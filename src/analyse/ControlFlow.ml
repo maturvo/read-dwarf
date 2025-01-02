@@ -132,14 +132,14 @@ let branch_table_target_addresses test filename_branch_table_option : (addr * ad
 
   (* pull out .rodata section from ELF *)
   let ((_, rodata_addr, bs) as _rodata : Dwarf.p_context * Nat_big_num.num * BytesSeq.t) =
-    Dwarf.extract_section_body test.elf_file ".rodata" false
+    Dwarf.extract_section_body_without_relocations test.elf_file ".rodata" false
   in
   (* chop into bytes *)
   let rodata_bytes : char array = BytesSeq.to_array bs in
 
   (* chop into 4-byte words - as needed for branch offset tables,
      though not for all other things in .rodata *)
-  let rodata_words : (natural * natural) list = Dwarf.words_of_byte_sequence rodata_addr bs [] in
+  let rodata_words : (natural * natural) list = Dwarf.words_of_rel_byte_sequence rodata_addr (Dwarf.rbs_no_reloc bs) [] in (*HACK*)
 
   let read_rodata_b addr =
     Elf_types_native_uint.natural_of_byte

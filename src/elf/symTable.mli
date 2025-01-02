@@ -57,7 +57,7 @@ type linksem_sym = Symbol.linksem_t
 (** The type of a symbol with offset *)
 type sym_offset = sym * int
 
-type linksem_t = Elf_file.global_symbol_init_info
+type linksem_t = LinksemRelocatable.global_symbol_init_info
 
 (** The type of a symbol table. *)
 type t
@@ -110,7 +110,7 @@ val of_position_string : t -> string -> sym_offset
 (** Extract the symbol from the linksem symbol representation.
 
     Need the segments for filling the missing symbol data *)
-val of_linksem : Segment.t list -> linksem_t -> t
+val of_linksem : linksem_t -> t
 
 (** Pretty print the table as a raw ocaml value *)
 val pp_raw : t -> Pp.document

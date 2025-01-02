@@ -55,12 +55,19 @@ type typ = NOTYPE | OBJECT | FUNC | SECTION | FILE | UNKNOWN
 
 type linksem_typ = Z.t
 
+(* TODO: move somewhere to reuse *)
+type addr = {
+  section : string;
+  offset: int;
+}
+
 (** The ELF symbol. This type guarantee the data exists contrary to linksem symbols
     (it may be all zeros though) *)
 type t = {
   name : string;
   other_names : string list;
   typ : typ;
+  (* addr : addr; *)
   addr : int;
   size : int;
   writable : bool;
@@ -68,13 +75,13 @@ type t = {
 }
 
 (** The type of an ELF symbol in linksem. See {!of_linksem}*)
-type linksem_t = string * (Z.t * Z.t * Z.t * BytesSeq.t option * Z.t)
+type linksem_t = LinksemRelocatable.symbol
 
 (** Add a name to the other names list *)
 val push_name : string -> t -> t
 
 (** Check if an address is in a symbol *)
-val is_in : t -> int -> bool
+(* val is_in : t -> int -> bool *)
 
 (** For conformance with the {!Utils.RngMap.LenObject} module type *)
 val len : t -> int
@@ -93,7 +100,7 @@ exception LoadingError of string * int
     May raise {!LoadingError} when the symbol has no data and the
     data cannot be found in the segments
 *)
-val of_linksem : Segment.t list -> linksem_t -> t
+val of_linksem : linksem_t -> t
 
 (** Tell if a symbol type is interesting for readDwarf purposes *)
 val is_interesting : typ -> bool

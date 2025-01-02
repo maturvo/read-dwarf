@@ -143,7 +143,7 @@ let parse_elf_file (filename : string) : test =
           segments
       in
       let ds =
-        match Dwarf.extract_dwarf_static (Elf_file.ELF_File_64 f1) with
+        match Dwarf.extract_dwarf_static (Elf_file.ELF_File_64 f1) Abi_aarch64_symbolic_relocation.aarch64_data_relocation_interpreter with
         | None -> fatal "%s" "extract_dwarf_static failed"
         | Some ds ->
             (* Debug.print_string2 (Dwarf.pp_analysed_location_data ds.Dwarf.ds_dwarf

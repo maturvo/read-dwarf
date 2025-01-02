@@ -59,7 +59,7 @@ type sym_offset = sym * int
 module RMap = RngMap.Make (Symbol)
 module SMap = Map.Make (String)
 
-type linksem_t = Elf_file.global_symbol_init_info
+type linksem_t = LinksemRelocatable.global_symbol_init_info
 
 type t = { by_name : sym SMap.t; by_addr : RMap.t }
 
@@ -111,11 +111,11 @@ let of_position_string t s : sym_offset =
   if s = "" then raise Not_found;
   if s.[0] = '0' then of_addr_with_offset t (int_of_string s) else sym_offset_of_string t s
 
-let of_linksem segments linksem_map =
-  let add_linksem_sym_to_map (map : t) (lsym : linksem_sym) =
-    if is_interesting_linksem lsym then add map (Symbol.of_linksem segments lsym) else map
-  in
-  List.fold_left add_linksem_sym_to_map empty linksem_map
+  let of_linksem linksem_map =
+    let add_linksem_sym_to_map (map : t) (lsym : linksem_sym) =
+      if is_interesting_linksem lsym then add map (Symbol.of_linksem lsym) else map
+    in
+    List.fold_left add_linksem_sym_to_map empty linksem_map
 
 let pp_raw st = RMap.bindings st.by_addr |> List.map (Pair.map Pp.ptr pp_raw) |> Pp.mapping "syms"
 

@@ -1,0 +1,3 @@
+Symbolic symbol table
+- value of symbol?? (we don't have segments in relocatable files)
+- can probably keep the same api, but addresses are symbolic

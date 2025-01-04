@@ -70,10 +70,11 @@ let expand ~(ctxt : ctxt) (exp : Base.exp) : State.exp =
     otherwise the type will be [None] *)
 let expand_tval ~(ctxt : ctxt) (exp : Base.exp) : State.tval =
   let sexp = expand ~ctxt exp in
-  if Ctxt.typing_enabled ~ctxt then
+  (* if Ctxt.typing_enabled ~ctxt then
     let ctyp = Typer.expr ~ctxt exp in
     { ctyp; exp = sexp }
-  else { ctyp = None; exp = sexp }
+  else *)
+    { ctyp = None; exp = sexp }
 
 (** Run the event.
     The modified state is the one inside [ctxt]. *)
@@ -85,22 +86,23 @@ let event_mut ~(ctxt : ctxt) (event : Base.event) =
   | ReadMem { addr; value; size } ->
       let naddr = expand ~ctxt addr in
       let tval =
-        match ctxt.dwarf with
+        (* match ctxt.dwarf with
         | Some dwarf ->
             let ptrtype = Typer.expr ~ctxt addr in
             Typer.read ~dwarf ctxt.state ?ptrtype ~addr:naddr ~size
-        | None -> State.read_noprov ctxt.state ~addr:naddr ~size |> State.Tval.of_exp
+        | None -> *)
+            State.read_noprov ctxt.state ~addr:naddr ~size |> State.Tval.of_exp
       in
       HashVector.set ctxt.mem_reads value tval
   | WriteMem { addr; value; size } -> (
       let naddr = expand ~ctxt addr in
-      match ctxt.dwarf with
+      (* match ctxt.dwarf with
       | Some dwarf ->
           let ptrtype = Typer.expr ~ctxt addr in
           debug "Typed write mem with ptr:%t" (Pp.top (Pp.opt Ctype.pp) ptrtype);
           let value = expand_tval ~ctxt value in
           Typer.write ~dwarf ctxt.state ?ptrtype ~addr:naddr ~size value
-      | None ->
+      | None -> *)
           let value = expand ~ctxt value in
           State.write_noprov ctxt.state ~addr:naddr ~size value
     )

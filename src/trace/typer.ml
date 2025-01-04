@@ -1,4 +1,4 @@
-(*==================================================================================*)
+(* ==================================================================================
 (*  BSD 2-Clause License                                                            *)
 (*                                                                                  *)
 (*  Copyright (c) 2020-2021 Thibaut Pérami                                          *)
@@ -314,4 +314,4 @@ let write ~(dwarf : Dw.t) (s : State.t) ?(ptrtype : Ctype.t option) ~addr ~size
       State.write ~provenance s ~addr ~size value.exp
   | _ ->
       warn "Writing without provenance";
-      State.write_noprov s ~addr ~size value.exp
+      State.write_noprov s ~addr ~size value.exp *)

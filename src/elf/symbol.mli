@@ -67,8 +67,8 @@ type t = {
   name : string;
   other_names : string list;
   typ : typ;
-  (* addr : addr; *)
-  addr : int;
+  addr : addr;
+  (* addr : int; *)
   size : int;
   writable : bool;
   data : BytesSeq.t;
@@ -116,6 +116,9 @@ val compare : t -> t -> int
 
 (** Pretty prints a symbol type *)
 val pp_typ : typ -> Pp.document
+
+(** Pretty prints symbolic address *)
+val pp_addr : addr -> Pp.document
 
 (** Raw pretty printing of a symbol *)
 val pp_raw : t -> Pp.document

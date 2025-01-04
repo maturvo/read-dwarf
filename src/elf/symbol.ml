@@ -62,8 +62,8 @@ type t = {
   name : string;
   other_names : string list;
   typ : typ;
-  (* addr : addr; *)
-  addr : int;
+  addr : addr;
+  (* addr : int; *)
   size : int;
   writable : bool;
   data : BytesSeq.t;
@@ -98,16 +98,15 @@ let _ =
     | _ -> None)
 
 (* for debugging TODO remove *)
-module SMap = Map.Make (String)
-let locs = SMap.empty |> SMap.add ".text" 0 |> SMap.add ".data" 1000000 |> SMap.add ".eh_frame" 2000000
+(* module SMap = Map.Make (String)
+let locs = SMap.empty |> SMap.add ".text" 0 |> SMap.add ".data" 1000000 |> SMap.add ".eh_frame" 2000000 *)
 
 let of_linksem (name, (typ, size, addr, data, _), writable) =
   let typ = typ_of_linksem typ in
   let size = Z.to_int size in
   let section, offset = addr in
-  (* let addr = { section; offset = Z.to_int offset } in *)
-  let addr = SMap.find section locs + Z.to_int offset in
-  debug "Symbol %s at address %s+%d (using %d)" name section (Z.to_int offset) addr;
+  let addr = { section; offset = Z.to_int offset } in
+  (* let addr = SMap.find section locs + Z.to_int offset in *)
   { name; other_names = []; typ; size; addr; data; writable }
 
 let is_interesting = function OBJECT | FUNC -> true | _ -> false
@@ -129,6 +128,8 @@ let pp_typ typ =
   | FILE -> "FILE"
   | UNKNOWN -> "UNKNOWN"
 
+let pp_addr addr = Pp.(!^(addr.section) ^^ !^"+" ^^ ptr addr.offset)
+
 let pp_raw sym =
   Pp.(
     !^"sym"
@@ -137,8 +138,8 @@ let pp_raw sym =
            ("name", !^(sym.name));
            ("other names", separate nbspace (List.map string sym.other_names));
            ("typ", pp_typ sym.typ);
-           (* ("addr", !^(sym.addr.section) ^^ !^"+" ^^ ptr sym.addr.offset); *)
-           ("addr", ptr sym.addr);
+           ("addr", pp_addr sym.addr);
+           (* ("addr", ptr sym.addr); *)
            ("size", ptr sym.size);
            ("writable", bool sym.writable);
            ("data", BytesSeq.ppby ~by:4 sym.data);

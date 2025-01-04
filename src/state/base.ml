@@ -429,9 +429,10 @@ let read_from_rodata (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t option
       if not @@ ConcreteEval.is_concrete addr then None
       else
         let int_addr = ConcreteEval.eval addr |> Value.expect_bv |> BitVec.to_int in
+        let sym_addr = Elf.Symbol.{ section = ".rodata"; offset = int_addr } in (* TODO this is wrong *)
         let size = size |> Ast.Size.to_bits in
         try
-          let (sym, offset) = Elf.SymTable.of_addr_with_offset elf.symbols int_addr in
+          let (sym, offset) = Elf.SymTable.of_addr_with_offset elf.symbols sym_addr in
           if sym.writable then None
           else
             (* Assume little endian here *)

@@ -120,7 +120,8 @@ let of_linksem ?(amap = Arch.dwarf_reg_map ()) (elf : Elf.File.t) : linksem_t ->
   (* Global *)
   | [{ op_semantics = OpSem_lit; op_code = code; op_argument_values = [arg]; _ }] as ops
     when Z.to_int code = vDW_OP_addr -> (
-      try Global (Elf.SymTable.of_addr_with_offset elf.symbols @@ int_of_oav arg)
+      let addr = Elf.Symbol.{ section = ".data"; offset = int_of_oav arg } in (* TODO this is wrong, need symbolic DWARF*)
+      try Global (Elf.SymTable.of_addr_with_offset elf.symbols @@ addr)
       with Not_found ->
         warn "Symbol at 0x%x not found in Loc.of_linksem" (int_of_oav arg);
         Dwarf ops

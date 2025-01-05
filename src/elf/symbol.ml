@@ -52,17 +52,11 @@ type typ = NOTYPE | OBJECT | FUNC | SECTION | FILE | UNKNOWN
 
 type linksem_typ = Z.t
 
-(* TODO: move somewhere to reuse *)
-type addr = {
-  section : string;
-  offset: int;
-}
-
 type t = {
   name : string;
   other_names : string list;
   typ : typ;
-  addr : addr;
+  addr : Address.t;
   (* addr : int; *)
   size : int;
   writable : bool;
@@ -104,8 +98,7 @@ let locs = SMap.empty |> SMap.add ".text" 0 |> SMap.add ".data" 1000000 |> SMap.
 let of_linksem (name, (typ, size, addr, data, _), writable) =
   let typ = typ_of_linksem typ in
   let size = Z.to_int size in
-  let section, offset = addr in
-  let addr = { section; offset = Z.to_int offset } in
+  let addr = Address.of_linksem addr in
   (* let addr = SMap.find section locs + Z.to_int offset in *)
   { name; other_names = []; typ; size; addr; data; writable }
 
@@ -128,8 +121,6 @@ let pp_typ typ =
   | FILE -> "FILE"
   | UNKNOWN -> "UNKNOWN"
 
-let pp_addr addr = Pp.(!^(addr.section) ^^ !^"+" ^^ ptr addr.offset)
-
 let pp_raw sym =
   Pp.(
     !^"sym"
@@ -138,7 +129,7 @@ let pp_raw sym =
            ("name", !^(sym.name));
            ("other names", separate nbspace (List.map string sym.other_names));
            ("typ", pp_typ sym.typ);
-           ("addr", pp_addr sym.addr);
+           ("addr", Address.pp sym.addr);
            (* ("addr", ptr sym.addr); *)
            ("size", ptr sym.size);
            ("writable", bool sym.writable);

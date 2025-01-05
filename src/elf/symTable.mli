@@ -78,19 +78,19 @@ val of_name_opt : t -> string -> sym option
 
 (** Get the symbol owning that address. Not_found is raised if no symbol own that address.data
       See {!of_addr_opt} *)
-val of_addr : t -> Symbol.addr -> sym
+val of_addr : t -> Address.t -> sym
 
 (** Get the symbol owning that address. None if no symbol own that address. See {!of_addr} *)
-val of_addr_opt : t -> Symbol.addr -> sym option
+val of_addr_opt : t -> Address.t -> sym option
 
 (** Get a symbol with the offset that correspond to that address *)
-val of_addr_with_offset : t -> Symbol.addr -> sym_offset
+val of_addr_with_offset : t -> Address.t -> sym_offset
 
 (** Get a symbol with the offset that correspond to that address *)
-val of_addr_with_offset_opt : t -> Symbol.addr -> sym_offset option
+val of_addr_with_offset_opt : t -> Address.t -> sym_offset option
 
 (** Get back the raw address from a symbol+offset value *)
-val to_addr_offset : sym_offset -> Symbol.addr
+val to_addr_offset : sym_offset -> Address.t
 
 (** Transform a symbol + offset into the corresponding string *)
 val string_of_sym_offset : sym_offset -> string

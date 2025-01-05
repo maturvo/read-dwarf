@@ -55,19 +55,13 @@ type typ = NOTYPE | OBJECT | FUNC | SECTION | FILE | UNKNOWN
 
 type linksem_typ = Z.t
 
-(* TODO: move somewhere to reuse *)
-type addr = {
-  section : string;
-  offset: int;
-}
-
 (** The ELF symbol. This type guarantee the data exists contrary to linksem symbols
     (it may be all zeros though) *)
 type t = {
   name : string;
   other_names : string list;
   typ : typ;
-  addr : addr;
+  addr : Address.t;
   (* addr : int; *)
   size : int;
   writable : bool;
@@ -116,9 +110,6 @@ val compare : t -> t -> int
 
 (** Pretty prints a symbol type *)
 val pp_typ : typ -> Pp.document
-
-(** Pretty prints symbolic address *)
-val pp_addr : addr -> Pp.document
 
 (** Raw pretty printing of a symbol *)
 val pp_raw : t -> Pp.document

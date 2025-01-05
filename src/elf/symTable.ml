@@ -62,7 +62,7 @@ module SMap = Map.Make (String)
 module AddrMap = struct
   type t = RMap.t SMap.t
 
-  let add t addr sym =
+  let add t (addr: Address.t) sym =
     SMap.update addr.section (fun old ->
       let old = match old with
       | None -> RMap.empty
@@ -71,28 +71,28 @@ module AddrMap = struct
       Some (RMap.add old addr.offset sym)
     ) t
   
-  let update f t addr =
+  let update f t (addr: Address.t) =
     SMap.update addr.section (Option.map (fun x -> RMap.update f x addr.offset)) t
   
   let empty = SMap.empty
 
-  let at t addr =
+  let at t (addr: Address.t) =
     SMap.find addr.section t |> Fun.flip RMap.at addr.offset
 
-  let at_opt t addr =
+  let at_opt t (addr: Address.t) =
     Option.bind (SMap.find_opt addr.section t) @@ Fun.flip RMap.at_opt addr.offset
   
-  let at_off t addr =
+  let at_off t (addr: Address.t) =
     SMap.find addr.section t |> Fun.flip RMap.at_off addr.offset
   
-  let at_off_opt t addr =
+  let at_off_opt t (addr: Address.t) =
     Option.bind (SMap.find_opt addr.section t) @@ Fun.flip RMap.at_off_opt addr.offset
   
   let bindings t =
     let sections = SMap.bindings t in
     List.bind sections @@ fun (section, rmap) ->
       let inner_bindings = RMap.bindings rmap in
-      List.map (fun (offset, sym) -> ({section; offset}, sym)) inner_bindings
+      List.map (fun (offset, sym) -> (Address.{section; offset}, sym)) inner_bindings
   
   
 end
@@ -134,7 +134,7 @@ let of_addr_with_offset t addr = AddrMap.at_off t.by_addr addr
 
 let of_addr_with_offset_opt t addr = AddrMap.at_off_opt t.by_addr addr
 
-let to_addr_offset (sym, offset) = { section = sym.addr.section; offset = sym.addr.offset + offset }
+let to_addr_offset (sym, offset) = Address.(sym.addr + offset)
 
 let string_of_sym_offset ((sym, off) : sym_offset) = sym.name ^ "+" ^ string_of_int off
 
@@ -156,7 +156,7 @@ let of_linksem linksem_map =
   in
   List.fold_left add_linksem_sym_to_map empty linksem_map
 
-let pp_raw st = AddrMap.bindings st.by_addr |> List.map (Pair.map pp_addr pp_raw) |> Pp.mapping "syms"
+let pp_raw st = AddrMap.bindings st.by_addr |> List.map (Pair.map Address.pp pp_raw) |> Pp.mapping "syms"
 
 let iter t f = SMap.iter (fun _ value -> f value) t.by_name
 

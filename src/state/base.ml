@@ -317,7 +317,7 @@ type t = {
           However the symbolic execution should always be more concrete with
           it than without it *)
   fenv : Fragment.env;  (** The memory type environment. See {!Fragment.env} *)
-  mutable last_pc : int;
+  mutable last_pc : Elf.Address.t;
       (** The PC of the instruction that lead into this state. The state should be
           right after that instruction. This has no semantic meaning as part of the state.
           It's just for helping knowing what comes from where *)
@@ -354,7 +354,7 @@ let make ?elf () =
       mem = Mem.empty ();
       elf;
       fenv = Fragment.Env.make ();
-      last_pc = 0;
+      last_pc = Elf.Address.{ section = ".text"; offset = 0 }; (* TODO is this right? *)
     }
   in
   next_id := id + 1;
@@ -498,6 +498,11 @@ let set_pc ~(pc : Reg.t) (s : t) (pcval : int) =
   let ctyp = Ctype.of_frag Ctype.Global ~offset:pcval ~constexpr:true in
   set_reg s pc @@ Tval.make ~ctyp exp
 
+(* TODO *)
+let set_pc_sym ~(pc : Reg.t) (s : t) (pcval : Elf.Address.t) =
+  set_pc ~pc s pcval.offset
+  
+
 let bump_pc ~(pc : Reg.t) (s : t) (bump : int) =
   let pc_exp = get_reg_exp s pc in
   assert (ConcreteEval.is_concrete pc_exp);
@@ -520,7 +525,7 @@ let pp s =
     [
       ("id", Id.pp s.id);
       ("base_state", Option.fold ~none:!^"none" ~some:(fun s -> Id.pp s.id) s.base_state);
-      ("last_pc", ptr s.last_pc);
+      ("last_pc", Elf.Address.pp s.last_pc);
       ("regs", Reg.Map.pp Tval.pp s.regs);
       ("fenv", Fragment.Env.pp s.fenv);
       ("read_vars", Vec.ppi Tval.pp s.read_vars);
@@ -537,7 +542,7 @@ let pp_partial ~regs s =
        [
          ("id", Id.pp s.id |> some);
          ("base_state", Option.map (fun s -> Id.pp s.id) s.base_state);
-         ("last_pc", ptr s.last_pc |> some);
+         ("last_pc", Elf.Address.pp s.last_pc |> some);
          ( "regs",
            List.map (fun reg -> (Reg.pp reg, Reg.Map.get s.regs reg |> Tval.pp)) regs
            |> Pp.mapping "" |> some );

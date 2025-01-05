@@ -85,7 +85,7 @@ let get_state_tree ~elf:elfname ~name ?(dump = false) ?(entry = false) ?len ?(br
         let open Option in
         unlift_pair
         @@ let+ l = len in
-           (sym.addr, sym.addr + l)
+           (sym.addr, Elf.Address.(sym.addr + l))
       in
       let endpred = Block_lib.gen_endpred ?min ?max ?loop ~brks () in
       let runner = Runner.of_dwarf dwarf in

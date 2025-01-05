@@ -292,7 +292,7 @@ type t = private {
           However the symbolic execution should always be more concrete with
           it than without it *)
   fenv : Fragment.env;  (** The memory type environment. See {!Fragment.env} *)
-  mutable last_pc : int;
+  mutable last_pc : Elf.Address.t;
       (** The PC of the instruction that lead into this state. The state should be
           right after that instruction. This has no semantic meaning as part of the state.
           It's just for helping knowing what comes from where *)
@@ -464,6 +464,8 @@ val update_reg_exp : t -> Reg.t -> (exp -> exp) -> unit
 (** Set the PC to a concrete value and keep its type appropriate *)
 val set_pc : pc:Reg.t -> t -> int -> unit
 
+val set_pc_sym : pc:Reg.t -> t -> Elf.Address.t -> unit
+
 (** Bump a concrete PC by a concrete bump (generally the size of a non-branching instruction *)
 val bump_pc : pc:Reg.t -> t -> int -> unit
 
@@ -471,7 +473,7 @@ val bump_pc : pc:Reg.t -> t -> int -> unit
 val concretize_pc : pc:Reg.t -> t -> unit
 
 (** Set the [last_pc] of the state *)
-val set_last_pc : t -> int -> unit
+val set_last_pc : t -> Elf.Address.t -> unit
 
 (** {1 Pretty printing } *)
 

@@ -56,7 +56,7 @@ open Logs.Logger (struct
 end)
 
 (** [endpred pc_exp] gives when to stop *)
-type t = { runner : Runner.t; start : int; endpred : State.exp -> string option }
+type t = { runner : Runner.t; start : Elf.Address.t; endpred : State.exp -> string option }
 
 (** Build a complex block starting from [start] in [sym] and ending when [endpred] says so.
     [endpred] is a predicate on the symbolic PC expression *)
@@ -137,7 +137,7 @@ let run ?(every_instruction = false) ?relevant (b : t) (start : State.t) : label
     end
   in
   let state = State.copy start in
-  State.set_pc ~pc:pcreg state b.start;
+  State.set_pc_sym ~pc:pcreg state b.start;
   let rest = [run_from state] in
   State.Tree.{ state = start; data = Start; rest }
 
@@ -148,6 +148,12 @@ let run ?(every_instruction = false) ?relevant (b : t) (start : State.t) : label
     - pc has be seen more than [loop]
 *)
 let gen_endpred ?min ?max ?loop ?(brks = []) () : State.exp -> string option =
+  (* HACK *)
+  (* TODO rewrite for symbolic pc *)
+  let min = Option.map (fun min -> min.Elf.Address.offset) min in
+  let max = Option.map (fun max -> max.Elf.Address.offset) max in
+  let brks = List.map (fun brks -> brks.Elf.Address.offset) brks in
+  (*  *)
   let endnow fmt = Printf.ksprintf Option.some fmt in
   let pchtbl = Hashtbl.create 10 in
   let loop_str =

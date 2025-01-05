@@ -48,14 +48,14 @@
     instructions.*)
 
 open Cmdliner
-open Config.CommonOpt
-open Fun
+(* open Config.CommonOpt *)
+(* open Fun *)
 
 open Logs.Logger (struct
   let str = __MODULE__
 end)
 
-let run_func_rd elfname name objdump_d branchtables breakpoints =
+(* let run_func_rd elfname name objdump_d branchtables breakpoints =
   base "Running with rd %s in %s" name elfname;
   base "Loading %s" elfname;
   let dwarf = Dw.of_file elfname in
@@ -142,7 +142,7 @@ let run_func_rd elfname name objdump_d branchtables breakpoints =
                  |> List.iter (fun (msg, st, regs) ->
                         base "At 0x%x, %s:\n%t" pc msg Pp.(topi (State.pp_partial ~regs) st));
                  print_string (print_analyse_instruction pc)))
-        runner.funcs
+        runner.funcs *)
 
 let elf =
   let doc = "ELF file from which to pull the code" in
@@ -168,7 +168,7 @@ let breakpoints =
   in
   Arg.(value & opt_all string [] & info ["b"; "break"] ~docv:"POSITION" ~doc)
 
-let term =
+(* let term =
   Term.(
     CmdlinerHelper.func_options comopts run_func_rd
     $ elf $ func $ objdump_d $ branch_table $ breakpoints)
@@ -181,4 +181,4 @@ let info =
   in
   Cmd.(info "run-func-rd" ~doc ~exits)
 
-let command = (term, info)
+let command = (term, info) *)

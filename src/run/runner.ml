@@ -75,9 +75,9 @@ type slot =
 type t = {
   elf : Elf.File.t;
   dwarf : Dw.t option;
-  instrs : (int, slot) Hashtbl.t;  (** Instruction cache *)
+  instrs : (Elf.Address.t, slot) Hashtbl.t;  (** Instruction cache *)
   pc : Reg.t;
-  funcs : int Vec.t;  (** Loaded functions by loading order *)
+  funcs : Elf.Address.t Vec.t;  (** Loaded functions by loading order *)
 }
 
 let of_elf ?dwarf elf =
@@ -100,36 +100,36 @@ let load_sym runner (sym : Elf.Symbol.t) =
     (fun code ->
       let (addr, instr_len) =
         let result = !addr and len = BytesSeq.length code in
-        addr := !addr + len;
+        addr := Elf.Address.(!addr + len);
         (result, len)
       in
       try
         let instr = Trace.Cache.get_instr code in
         if instr.traces = [] then begin
-          debug "Instruction at 0x%x in %s is loaded as special" addr sym.name;
+          debug "Instruction at %t in %s is loaded as special" (Pp.top Elf.Address.pp addr) sym.name;
           Hashtbl.add runner.instrs addr (Special instr_len)
         end
         else begin
-          debug "Instruction at 0x%x in %s is loaded as normal. Traces are:\n%t" addr sym.name
+          debug "Instruction at %t in %s is loaded as normal. Traces are:\n%t" (Pp.top Elf.Address.pp addr) sym.name
             Pp.(topi Trace.Instr.pp instr);
           Hashtbl.add runner.instrs addr (Normal instr)
         end
       with exn ->
-        warn "Could not convert isla trace of instruction at 0x%x in %s to Trace.t: %s\n%s" addr
+        warn "Could not convert isla trace of instruction at %t in %s to Trace.t: %s\n%s" (Pp.top Elf.Address.pp addr)
           runner.elf.filename (Printexc.to_string exn) (Printexc.get_backtrace ());
         Hashtbl.add runner.instrs addr (IslaFail instr_len))
     opcode_list
 
 (** Fetch an instruction, and return corresponding slot. *)
-let fetch (runner : t) (pc : int) : slot =
-  debug "Fetching PC 0x%x" pc;
+let fetch (runner : t) (pc : Elf.Address.t) : slot =
+  debug "Fetching PC %t" (Pp.top Elf.Address.pp pc);
   match Hashtbl.find_opt runner.instrs pc with
   | Some v -> v
   | None -> (
       match Elf.SymTable.of_addr_opt runner.elf.symbols pc with
       | Some sym when sym.typ = Elf.Symbol.FUNC ->
           if Hashtbl.mem runner.instrs sym.addr then begin
-            warn "Tried to fetch in middle of instructions in %s at 0x%x" runner.elf.filename pc;
+            warn "Tried to fetch in middle of instructions in %s at %t" runner.elf.filename (Pp.top Elf.Address.pp pc);
             Hashtbl.add runner.instrs pc Nocode;
             Nocode
           end
@@ -138,13 +138,13 @@ let fetch (runner : t) (pc : int) : slot =
             match Hashtbl.find_opt runner.instrs pc with
             | Some v -> v
             | None ->
-                warn "Tried to fetch in middle of instructions in %s at 0x%x" runner.elf.filename
-                  pc;
+                warn "Tried to fetch in middle of instructions in %s at %t" runner.elf.filename
+                  (Pp.top Elf.Address.pp pc);
                 Hashtbl.add runner.instrs pc Nocode;
                 Nocode
           end
       | _ ->
-          warn "Tried to fetch outside of normal code in %s at 0x%x" runner.elf.filename pc;
+          warn "Tried to fetch outside of normal code in %s at %t" runner.elf.filename (Pp.top Elf.Address.pp pc);
           Hashtbl.add runner.instrs pc Nocode;
           Nocode
     )
@@ -188,6 +188,7 @@ let skip runner state : State.t list =
   let pc_exp = State.get_reg_exp state runner.pc in
   try
     let pc = pc_exp |> Ast.expect_bits |> BitVec.to_int in
+    let pc = Elf.Address.{ section = ".text"; offset = pc } in (* TODO this is wrong, should get symbolic value from pc_exp *)
     match fetch runner pc with
     | Normal { traces = _; read = _; written = _; length; opcode = _ }
      |Special length
@@ -195,7 +196,7 @@ let skip runner state : State.t list =
         let state = State.copy_if_locked state in
         State.bump_pc ~pc:runner.pc state length;
         [state]
-    | Nocode -> Raise.fail "Trying to skip 0x%x in %s: no code there" pc runner.elf.filename
+    | Nocode -> Raise.fail "Trying to skip %t in %s: no code there" (Pp.tos Elf.Address.pp pc) runner.elf.filename
   with exn ->
     err "Trying to skip instruction at %t in %s: Unexpected error"
       Pp.(top State.Exp.pp pc_exp)
@@ -220,13 +221,14 @@ let run ?prelock runner state : State.t list =
   let pc_exp = State.get_reg_exp state runner.pc in
   try
     let pc = pc_exp |> Ast.expect_bits |> BitVec.to_int in
+    let pc = Elf.Address.{ section = ".text"; offset = pc } in (* TODO this is wrong, should get symbolic value from pc_exp *)
     match fetch runner pc with
     | Normal instr -> execute_normal ?prelock ~pc runner instr state
     | Special _ ->
-        Raise.fail "Special instruction at 0x%x in %s. unsupported for now" pc runner.elf.filename
-    | Nocode -> Raise.fail "Trying to run 0x%x in %s: no code there" pc runner.elf.filename
+        Raise.fail "Special instruction at %t in %s. unsupported for now" (Pp.tos Elf.Address.pp pc) runner.elf.filename
+    | Nocode -> Raise.fail "Trying to run %t in %s: no code there" (Pp.tos Elf.Address.pp pc) runner.elf.filename
     | IslaFail _ ->
-        Raise.fail "Trying to run 0x%x in %s: Isla pipeline failed on that instruction" pc
+        Raise.fail "Trying to run %t in %s: Isla pipeline failed on that instruction" (Pp.tos Elf.Address.pp pc)
           runner.elf.filename
   with exn ->
     err "Trying to run instruction at %t in %s: Unexpected error"
@@ -257,4 +259,4 @@ let pp_slot =
 (** Dump instruction table *)
 let pp_instr (runner : t) =
   let open Pp in
-  hashtbl_sorted ~name:"Instructions" ~compare ptr pp_slot runner.instrs
+  hashtbl_sorted ~name:"Instructions" ~compare Elf.Address.pp pp_slot runner.instrs

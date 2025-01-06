@@ -136,7 +136,7 @@ and fragment =
   | Single of t  (** Single object: Only when accessing of a global variable *)
   | DynArray of t  (** Generic C pointer, may point to multiple element of that type *)
   | DynFragment of int  (** Writable fragment for memory whose type is changing dynamically *)
-  | Global
+  | Global of string
       (** The Global fragment that contains all the fixed ELF section
                .text, .data, .rodata, ... *)
 
@@ -669,7 +669,7 @@ and pp_fragment frag =
   | DynArray t -> pp t ^^ !^"[]"
   | Unknown -> !^"unknown"
   | DynFragment i -> dprintf "frag %d" i
-  | Global -> !^"global"
+  | Global s -> !^"global " ^^ !^s
 
 and pp_offset = function
   | Const off when off = 0 -> empty

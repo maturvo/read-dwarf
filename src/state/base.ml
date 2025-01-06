@@ -493,9 +493,10 @@ let get_reg_exp s reg = get_reg s reg |> Tval.exp
 let update_reg_exp (s : t) (reg : Reg.t) (f : exp -> exp) =
   Reg.Map.get s.regs reg |> Tval.map_exp f |> Reg.Map.set s.regs reg
 
+(* TODO *)
 let set_pc ~(pc : Reg.t) (s : t) (pcval : int) =
   let exp = Typed.bits_int ~size:64 pcval in
-  let ctyp = Ctype.of_frag Ctype.Global ~offset:pcval ~constexpr:true in
+  let ctyp = Ctype.of_frag (Ctype.Global ".text") ~offset:pcval ~constexpr:true in
   set_reg s pc @@ Tval.make ~ctyp exp
 
 (* TODO *)

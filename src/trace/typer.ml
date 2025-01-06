@@ -1,4 +1,4 @@
-(* ==================================================================================
+(* ================================================================================== *)
 (*  BSD 2-Clause License                                                            *)
 (*                                                                                  *)
 (*  Copyright (c) 2020-2021 Thibaut Pérami                                          *)
@@ -178,7 +178,7 @@ let manyop ~ctxt (m : Ast.manyop) (tvals : tval list) : Ctype.t option =
       match List.hd tvals with
       | {
        exp = Unop (Extract (_, _), _, _);
-       ctyp = Some ({ unqualified = Ptr { fragment = Global; offset; _ }; _ } as ctyp);
+       ctyp = Some ({ unqualified = Ptr { fragment = Global _; offset; _ }; _ } as ctyp);
       } -> (
           match offset with
           | Somewhere -> Some ctyp
@@ -254,8 +254,8 @@ let fragment_at ~(dwarf : Dw.t) ~fenv ~size (frag : Ctype.fragment) at : Ctype.t
       let frag = Fragment.Env.get fenv i in
       let* (typ, off) = Fragment.at_off_opt frag at in
       Ctype.type_at ~env ~size typ off
-  | Global -> (
-      match Elf.SymTable.of_addr_with_offset_opt dwarf.elf.symbols at with
+  | Global s -> (
+      match Elf.SymTable.of_addr_with_offset_opt dwarf.elf.symbols Elf.Address.{ section = s; offset = at } with
       | Some (sym, offset) -> (
           match Hashtbl.find_opt dwarf.vars sym.name with
           | Some v -> Ctype.type_at ~env ~size v.ctype offset
@@ -314,4 +314,4 @@ let write ~(dwarf : Dw.t) (s : State.t) ?(ptrtype : Ctype.t option) ~addr ~size
       State.write ~provenance s ~addr ~size value.exp
   | _ ->
       warn "Writing without provenance";
-      State.write_noprov s ~addr ~size value.exp *)
+      State.write_noprov s ~addr ~size value.exp

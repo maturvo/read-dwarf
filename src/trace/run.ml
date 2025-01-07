@@ -85,6 +85,7 @@ let event_mut ~(ctxt : ctxt) (event : Base.event) =
   | WriteReg { reg; value } -> Vec.add_one ctxt.reg_writes (reg, expand_tval ~ctxt value)
   | ReadMem { addr; value; size } ->
       let naddr = expand ~ctxt addr in
+      debug "naddr: %t" (Pp.top State.Exp.pp naddr);
       let ptrtype = Typer.expr ~ctxt addr in
       debug "ptrtype: %t" Pp.(top (optional Ctype.pp) ptrtype);
       let tval =
@@ -97,6 +98,7 @@ let event_mut ~(ctxt : ctxt) (event : Base.event) =
       HashVector.set ctxt.mem_reads value tval
   | WriteMem { addr; value; size } -> (
       let naddr = expand ~ctxt addr in
+      debug "naddr: %t" (Pp.top State.Exp.pp naddr);
       let ptrtype = Typer.expr ~ctxt addr in
       debug "ptrtype: %t" Pp.(top (optional Ctype.pp) ptrtype);
       match ctxt.dwarf with

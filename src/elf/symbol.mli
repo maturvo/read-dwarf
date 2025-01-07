@@ -55,6 +55,11 @@ type typ = NOTYPE | OBJECT | FUNC | SECTION | FILE | UNKNOWN
 
 type linksem_typ = Z.t
 
+type data = {
+  data: BytesSeq.t;
+  relocations: Relocations.t
+}
+
 (** The ELF symbol. This type guarantee the data exists contrary to linksem symbols
     (it may be all zeros though) *)
 type t = {
@@ -65,7 +70,7 @@ type t = {
   (* addr : int; *)
   size : int;
   writable : bool;
-  data : BytesSeq.t;
+  data : data;
 }
 
 (** The type of an ELF symbol in linksem. See {!of_linksem}*)
@@ -103,7 +108,7 @@ val is_interesting : typ -> bool
 val is_interesting_linksem : linksem_t -> bool
 
 (** Take the BytesSeq.t corresponding to the offset and length *)
-val sub : t -> int -> int -> BytesSeq.t
+val sub : t -> int -> int -> data
 
 (** Starting address comparison *)
 val compare : t -> t -> int

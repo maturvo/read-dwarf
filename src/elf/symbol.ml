@@ -52,6 +52,11 @@ type typ = NOTYPE | OBJECT | FUNC | SECTION | FILE | UNKNOWN
 
 type linksem_typ = Z.t
 
+type data = {
+  data: BytesSeq.t;
+  relocations: Relocations.t
+}
+
 type t = {
   name : string;
   other_names : string list;
@@ -60,7 +65,7 @@ type t = {
   (* addr : int; *)
   size : int;
   writable : bool;
-  data : BytesSeq.t;
+  data : data;
 }
 
 type linksem_t = LinksemRelocatable.symbol
@@ -95,10 +100,11 @@ let _ =
 (* module SMap = Map.Make (String)
 let locs = SMap.empty |> SMap.add ".text" 0 |> SMap.add ".data" 1000000 |> SMap.add ".eh_frame" 2000000 *)
 
-let of_linksem (name, (typ, size, addr, data, _), writable) =
+let of_linksem (name, (typ, size, addr, (data, rels), _), writable) =
   let typ = typ_of_linksem typ in
   let size = Z.to_int size in
   let addr = Address.of_linksem addr in
+  let data = { data; relocations = Relocations.of_linksem rels } in
   (* let addr = SMap.find section locs + Z.to_int offset in *)
   { name; other_names = []; typ; size; addr; data; writable }
 
@@ -106,7 +112,10 @@ let is_interesting = function OBJECT | FUNC -> true | _ -> false
 
 let is_interesting_linksem lsym = lsym |> linksem_typ |> typ_of_linksem |> is_interesting
 
-let sub sym off len = BytesSeq.sub sym.data off len
+let sub sym off len = {
+  data = BytesSeq.sub sym.data.data off len;
+  relocations = Relocations.sub sym.data.relocations off len;
+}
 
 let compare s1 s2 = compare s1.addr s2.addr
 
@@ -133,5 +142,5 @@ let pp_raw sym =
            (* ("addr", ptr sym.addr); *)
            ("size", ptr sym.size);
            ("writable", bool sym.writable);
-           ("data", BytesSeq.ppby ~by:4 sym.data);
+           ("data", BytesSeq.ppby ~by:4 sym.data.data ^^ Relocations.pp sym.data.relocations);
          ])

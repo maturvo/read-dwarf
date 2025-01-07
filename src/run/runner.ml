@@ -104,7 +104,7 @@ let load_sym runner (sym : Elf.Symbol.t) =
         (result, len)
       in
       try
-        let instr = Trace.Cache.get_instr code in
+        let instr = Trace.Cache.get_instr (code, None) in (*TODO relocs*)
         if instr.traces = [] then begin
           debug "Instruction at %t in %s is loaded as special" (Pp.top Elf.Address.pp addr) sym.name;
           Hashtbl.add runner.instrs addr (Special instr_len)

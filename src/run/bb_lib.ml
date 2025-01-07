@@ -80,7 +80,7 @@ let from_binary (code : BytesSeq.t) : t =
             "BB.from_binary: Multiple path instruction.\n\
              If this is not a branching instruction, try `run-block --linear'."
     in
-    code |> Isla.Cache.get_traces |> get_normal
+    (code, None) |> Isla.Cache.get_traces |> get_normal (*TODO relocs *)
   in
   let main = code |> BytesSeq.to_listbs ~len:4 |> List.map process |> Array.of_list in
   { main }

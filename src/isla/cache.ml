@@ -77,45 +77,49 @@ type config = Server.config
       bit 0 to back -1 : The start of the data
       bit back -1: set *)
 module Opcode (*: Cache.Key *) = struct
-  type t = BytesSeq.t option
+  type t = Server.opcode option
 
   let equal a b =
     match (a, b) with
     | (None, None) -> true
-    | (Some bs, Some bs2) -> BytesSeq.equal bs bs2
+    | (Some (bs, r1), Some (bs2, r2)) -> BytesSeq.equal bs bs2 && r1 = r2
     | _ -> false
+
+  let small_enough bs rel_id =
+    BytesSeq.length bs < BytesSeq.int_bytes && rel_id < 16
 
   let hash = function
     | None -> 0
-    | Some bs ->
+    | Some (bs, rel) ->
         let i = BytesSeq.getintle_ze bs 0 in
         let l = BytesSeq.length bs in
-        if l < BytesSeq.int_bytes then begin
+        let rel_id = Server.reloc_id rel in
+        if small_enough bs rel_id then begin
           assert (not @@ IntBits.get i IntBits.back);
           let res = IntBits.blit l 0 i (IntBits.back - 3) 3 in
+          let res = IntBits.blit rel_id 0 res (IntBits.back - 7) 4 in
           res
         end
         else IntBits.set i IntBits.back
 
-  let to_file file = function
+  let to_file _file = function
     | None -> ()
-    | Some bs ->
-        if BytesSeq.length bs < BytesSeq.int_bytes then ()
+    | Some (bs, rel) ->
+        let rel_id = Server.reloc_id rel in
+        if small_enough bs rel_id then ()
         else
-          let keyfile = Utils.Cache.to_keyfile file in
-          Files.write_bin BytesSeq.output keyfile bs
+          Raise.todo()
 
-  let of_file hash file =
+  let of_file hash _file =
     if hash = 0 then None
     else if IntBits.get hash IntBits.back then
-      let keyfile = Utils.Cache.to_keyfile file in
-      Some (Files.read BytesSeq.input keyfile)
+      Raise.todo()
     else
       let data = IntBits.sub hash 0 (IntBits.back - 3) in
       let size = IntBits.sub hash (IntBits.back - 3) 3 in
       let b = Bytes.create size in
       Bits.unsafe_blit_of_int data 0 b 0 (size * 8);
-      Some (BytesSeq.of_bytes b)
+      Some (BytesSeq.of_bytes b, None)
 end
 
 (** Representation of trace lists on disk.
@@ -216,13 +220,14 @@ let get_cache () =
   match !cache with Some cache -> cache | None -> failwith "Isla cache was not started"
 
 (** Get the traces of the opcode given. Use {!Server} if the value is not in the cache *)
-let get_traces (opcode : BytesSeq.t) : Base.rtrc list =
+let get_traces (opcode : Server.opcode) : Base.rtrc list =
   let (cache, config) = get_cache () in
   match IC.get_opt cache (Some opcode) with
   | Some trcs -> trcs
   | None ->
       ensure_started ();
-      let trcs = Server.request_bin_parsed opcode in
+      let raw_opcode, _ = opcode in (*TODO*)
+      let trcs = Server.request_bin_parsed raw_opcode in
       let ptrcs = Preprocess.preprocess config trcs in
       IC.add cache (Some opcode) ptrcs;
       ptrcs

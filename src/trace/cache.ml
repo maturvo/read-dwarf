@@ -155,7 +155,7 @@ let get_cache () =
   match !cache with Some cache -> cache | None -> failwith "Trace cache was not started"
 
 (** Get the traces of the opcode given. Use {!Isla.Server} if the value is not in the cache *)
-let get_traces (opcode : BytesSeq.t) : Base.t list =
+let get_traces (opcode : Isla.Server.opcode) : Base.t list =
   let cache = get_cache () in
   match TC.get_opt cache (Some opcode) with
   | Some trcs -> trcs
@@ -168,4 +168,4 @@ let get_traces (opcode : BytesSeq.t) : Base.t list =
 
 (** Get a full blown {!Instr} from the opcode, going through the whole Isla pipeline
     if necessary.*)
-let get_instr (opcode : BytesSeq.t) : Instr.t = Instr.of_traces opcode @@ get_traces opcode
+let get_instr (opcode : Isla.Server.opcode) : Instr.t = Instr.of_traces opcode @@ get_traces opcode

@@ -68,6 +68,13 @@ type config = Config.t
     processor exception/fault) or not *)
 type trcs = (bool * Base.rtrc) list
 
+type reloc = |
+
+let reloc_id: reloc option -> int = function
+| None -> 0
+
+type opcode = BytesSeq.t * reloc option
+
 (** Bump when updating isla.
     TODO: move the version checking to allow a range of version.
     Also, right now the cache invalidation is based on

@@ -152,7 +152,7 @@ let get_traces instr isla_run dump_types : traces =
   Isla.Cache.start @@ Arch.get_isla_config ();
   (* I call Init.init manually to print the register types *)
   Init.init () |> ignore;
-  let rtraces = Isla.Cache.get_traces instr in
+  let rtraces = Isla.Cache.get_traces (instr, None) in (* TODO relocs *)
   List.iter (fun t -> Isla.Type.type_trc t |> ignore) rtraces;
   if dump_types then base "Register types:\n%t\n" (Pp.topi State.Reg.pp_index ());
   if isla_run then IslaTraces rtraces else Traces (List.map Trace.of_isla rtraces)

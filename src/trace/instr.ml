@@ -66,7 +66,7 @@ type t = {
   length : int;  (** Bytes length *)
   read : Reg.t list;
   written : Reg.t list;
-  opcode : BytesSeq.t;
+  opcode : Isla.Server.opcode;
 }
 
 let dedup_regs = List.sort_uniq State.Reg.compare
@@ -101,7 +101,8 @@ let trace_meta_of_trace trace =
 (** Generate full instruction data from a list of traces *)
 let of_traces opcode traces =
   let traces = List.map trace_meta_of_trace traces in
-  let length = BytesSeq.length opcode in
+  let raw_opcode, _ = opcode in
+  let length = BytesSeq.length raw_opcode in
   let read = dedup_regs @@ List.concat_map (fun (tr : trace_meta) -> tr.read) traces in
   let written = dedup_regs @@ List.concat_map (fun (tr : trace_meta) -> tr.written) traces in
   { traces; length; read; written; opcode }

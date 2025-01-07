@@ -67,7 +67,7 @@ let expand_var ~(ctxt : t) (v : Base.Var.t) (a : Ast.no Ast.ty) : State.exp =
   assert (Base.Var.ty v = a);
   match v with
   | Register reg -> State.get_reg_exp ctxt.state reg
-  | NonDet (i, _) | Read (i, _) -> (HashVector.get ctxt.mem_reads i).exp
+  | NonDet (i, _) | Read (i, _) -> (HashVector.get ctxt.mem_reads i).exp (* TODO is the NonDet case correct *)
 
 let map_var ~(ctxt : t) (v : Base.Var.t) (a : Ast.no Ast.ty) : State.var =
   assert (Base.Var.ty v = a);

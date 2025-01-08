@@ -94,16 +94,17 @@ let of_dwarf dwarf = of_elf ~dwarf dwarf.elf
 let load_sym runner (sym : Elf.Symbol.t) =
   info "Loading symbol %s in %s" sym.name runner.elf.filename;
   Vec.add_one runner.funcs sym.addr;
-  let opcode_list = Arch.split_into_instrs sym.data.data in (* TODO relocations *)
+  let opcode_list = Arch.split_into_instrs sym.data in (* TODO relocations *)
   let addr = ref sym.addr in
   List.iter
-    (fun code ->
+    (fun Elf.Symbol.{ data = code; relocations } ->
       let (addr, instr_len) =
         let result = !addr and len = BytesSeq.length code in
         addr := Elf.Address.(!addr + len);
         (result, len)
       in
       try
+        let _reloc = Elf.Relocations.IMap.find_opt 0 relocations in
         let instr = Trace.Cache.get_instr (code, None) in (*TODO relocs*)
         if instr.traces = [] then begin
           debug "Instruction at %t in %s is loaded as special" (Pp.top Elf.Address.pp addr) sym.name;

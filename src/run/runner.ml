@@ -94,7 +94,7 @@ let of_dwarf dwarf = of_elf ~dwarf dwarf.elf
 let load_sym runner (sym : Elf.Symbol.t) =
   info "Loading symbol %s in %s" sym.name runner.elf.filename;
   Vec.add_one runner.funcs sym.addr;
-  let opcode_list = Arch.split_into_instrs sym.data in
+  let opcode_list = Arch.split_into_instrs sym.data.data in (* TODO relocations *)
   let addr = ref sym.addr in
   List.iter
     (fun code ->

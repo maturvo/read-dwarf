@@ -436,7 +436,7 @@ let read_from_rodata (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t option
           if sym.writable then None
           else
             (* Assume little endian here *)
-            let bv = BytesSeq.getbvle ~size sym.data offset in
+            let bv = BytesSeq.getbvle ~size sym.data.data offset in (* TODO relocations *)
             Some (Typed.bits bv)
         with Not_found ->
           let rodata = elf.rodata in

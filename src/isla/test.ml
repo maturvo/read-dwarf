@@ -166,7 +166,7 @@ let input imode (arg : string) : (string * string) Term.ret =
         try Elf.SymTable.of_position_string elf.symbols s
         with Not_found -> fail "The position %s could not be found in %s" s arg
       in
-      `Ok (filename, BytesSeq.to_string (BytesSeq.sub sym.data off 4))
+      `Ok (filename, BytesSeq.to_string (BytesSeq.sub sym.data.data off 4)) (* TODO relocations *)
 
 let input_term = Term.(ret (const input $ imode_term $ arg))
 

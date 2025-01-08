@@ -68,10 +68,16 @@ type config = Config.t
     processor exception/fault) or not *)
 type trcs = (bool * Base.rtrc) list
 
-type reloc = |
+type reloc = Elf.Relocations.target
 
 let reloc_id: reloc option -> int = function
 | None -> 0
+| Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data640) -> 1
+| Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data320) -> 2
+| Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADRP) -> 3
+| Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADD) -> 4
+| Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.LDST) -> 5
+| Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL) -> 6
 
 type opcode = BytesSeq.t * reloc option
 

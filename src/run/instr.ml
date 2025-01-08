@@ -140,7 +140,7 @@ let get_instr arch instr elfopt : BytesSeq.t =
   in
   debug "Got symbol:\n%t\n" (Pp.topi Elf.Symbol.pp_raw sym);
   let len = 4 (* TODO proper Instruction length system *) in
-  BytesSeq.sub sym.data off len
+  BytesSeq.sub sym.data.data off len (*TODO relocations*)
 
 let instr_term = Term.(CmdlinerHelper.func_options comopts get_instr $ arch $ instr $ elf)
 

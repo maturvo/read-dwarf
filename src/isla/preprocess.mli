@@ -72,4 +72,4 @@ val simplify_trc : Base.rtrc -> Base.rtrc
 (** Preprocess a group of traces, by removing useless registers (according to
     the config), removing initialisation code and simplifying with
     {!simplify_trc} *)
-val preprocess : Server.config -> Server.trcs -> Base.rtrc list
+val preprocess : Server.config -> Server.trcs -> Base.rtrcs

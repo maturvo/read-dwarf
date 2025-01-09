@@ -320,8 +320,9 @@ let events_of_isla ~written_registers ~read_counter ~(vc : value_context) :
   | AbstractCall _ -> []
   | AbstractPrimop _ -> []
 
+  (* TODO segments *)
 (** Top level function to convert an isla trace to one of this module *)
-let of_isla (Trace events : Isla.rtrc) : t =
+let of_isla (_segments: Isla.segment list) (Trace events : Isla.rtrc) : t =
   let written_registers = Hashtbl.create 10 in
   let read_counter = Counter.make 0 in
   let vc = HashVector.empty () in

@@ -126,23 +126,14 @@ end
 
     It is just a list of traces separated by new lines *)
 module TraceList (*: Cache.Value *) = struct
-  type t = Base.rtrc list
+  type t = Base.rtrcs
 
   let to_file file (trcs : t) =
-    let output_trc ochannel trc = Pp.fprintln ochannel @@ Base.pp_trc trc in
-    let output_trcs = Files.output_list output_trc in
-    Files.write output_trcs file trcs
+    Files.write Pp.fprintln file (Base.pp_trcs trcs)
 
   let of_file file : t =
-    let num = ref 0 in
-    let input_trc ichannel =
-      let trc = Files.input_sexp ichannel in
-      let filename = Printf.sprintf "Trace %i of %s" !num file in
-      incr num;
-      Base.parse_trc_string ~filename trc
-    in
-    let input_trcs = Files.input_list input_trc in
-    Files.read input_trcs file
+    let filename = Printf.sprintf "Traces of %s" file in
+    Files.read Files.input_string file |> Base.parse_trcs_string ~filename
 end
 
 (** An epoch independant of the isla version, bump if you change the representation
@@ -220,7 +211,7 @@ let get_cache () =
   match !cache with Some cache -> cache | None -> failwith "Isla cache was not started"
 
 (** Get the traces of the opcode given. Use {!Server} if the value is not in the cache *)
-let get_traces (opcode : Server.opcode) : Base.rtrc list =
+let get_traces (opcode : Server.opcode) : Base.rtrcs =
   let (cache, config) = get_cache () in
   match IC.get_opt cache (Some opcode) with
   | Some trcs -> trcs
@@ -237,11 +228,13 @@ let get_traces (opcode : Server.opcode) : Base.rtrc list =
 let get_nop () : Base.rtrc =
   let (cache, _) = get_cache () in
   match IC.get_opt cache None with
-  | Some [trc] -> trc
+  | Some (Traces [trc]) -> trc
+  | Some (TracesWithSegments _) -> fatal "Corrupted cache, nop has segments"
   | Some _ -> fatal "Corrupted cache, nop hasn't exactly one trace"
   | None ->
       ensure_started ();
-      let trcs = Server.request_bin_parsed @@ Arch.nop () in
+      let (segs, trcs) = Server.request_bin_parsed @@ Arch.nop () in
+      assert (Option.is_none segs);
       let trc = List.assoc true trcs in
-      IC.add cache None [trc];
+      IC.add cache None (Traces [trc]);
       trc

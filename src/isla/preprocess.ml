@@ -157,7 +157,7 @@ let simplify_trc (Trace events : rtrc) : rtrc =
     (1 + Counter.read new_variables);
   Trace (List.rev !res)
 
-let preprocess (config : Server.config) (trcs : (bool * rtrc) list) : rtrc list =
+let preprocess (config : Server.config) ((segs, trcs) : Server.trcs) : rtrcs =
   let preprocess_one (b, trc) =
     if not b then None
     else
@@ -165,4 +165,7 @@ let preprocess (config : Server.config) (trcs : (bool * rtrc) list) : rtrc list 
       let trc = simplify_trc trc in
       Some trc
   in
-  List.filter_map preprocess_one trcs
+  let trcs = List.filter_map preprocess_one trcs in
+  match segs with
+  | None -> Traces (trcs)
+  | Some segs -> TracesWithSegments (segs, trcs)

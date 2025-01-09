@@ -204,7 +204,7 @@ let isla_run isla_mode arch (filename, input) : string * string * Server.config 
         start config;
         let msg : string =
           match request (isla_mode_to_request isla_mode input) with
-          | Traces l -> List.assoc true l
+          | Traces (_, l) -> List.assoc true l (* TODO segments *)
           | _ -> failwith "isla did not send back traces"
         in
         stop ();

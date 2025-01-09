@@ -214,13 +214,41 @@ let pp_answer = function
             |> separate (hardline ^^ hardline)))
 
 (** The type of a request to isla *)
-type request = TEXT_ASM of string | ASM of BytesSeq.t | VERSION | STOP
+type request = TEXT_ASM of string | ASM of opcode | VERSION | STOP
+
+let pp_interpreted_opcode (b, r) =
+  match r with
+  | None -> Pp.(!^"#x" ^^ BytesSeq.ppint b)
+  | Some (Elf.Relocations.AArch64 rtype) ->
+      let bits = BytesSeq.getbvle ~size:32 b 0 in
+      Pp.(
+        match rtype with
+        | Abi_aarch64_symbolic_relocation.Data640 -> Raise.fail "64bit relocation not allowed for instruction"
+        | Abi_aarch64_symbolic_relocation.Data320 -> !^"x:32"
+        | Abi_aarch64_symbolic_relocation.ADRP -> 
+            BitVec.pp_smt (BitVec.extract 31 31 bits)  
+            ^^ !^" x0:2 " ^^
+            BitVec.pp_smt (BitVec.extract 24 28 bits)
+            ^^ !^" x1:19 " ^^
+            BitVec.pp_smt (BitVec.extract 0 4 bits)
+        | Abi_aarch64_symbolic_relocation.ADD -> 
+            BitVec.pp_smt (BitVec.extract 22 31 bits)  
+            ^^ !^" x0:12 " ^^
+            BitVec.pp_smt (BitVec.extract 0 9 bits)
+        | Abi_aarch64_symbolic_relocation.LDST -> (* TODO different width loads, alignment *) 
+            BitVec.pp_smt (BitVec.extract 22 31 bits)  
+            ^^ !^" x0:10 " ^^
+            BitVec.pp_smt (BitVec.extract 0 11 bits)
+        | Abi_aarch64_symbolic_relocation.CALL -> 
+            BitVec.pp_smt (BitVec.extract 26 31 bits)  
+            ^^ !^" x0:26 "
+      )
 
 (** Convert a request into the string message expected by isla-client
     This should match the protocol *)
 let string_of_request = function
   | TEXT_ASM s -> Printf.sprintf "execute_asm %s" s
-  | ASM b -> Pp.(sprintc @@ !^"execute " ^^ BytesSeq.ppint b)
+  | ASM b -> Pp.(sprintc @@ !^"execute " ^^ pp_interpreted_opcode b)
   | VERSION -> "version"
   | STOP -> "stop"
 
@@ -243,7 +271,7 @@ let request (req : request) : answer = req |> string_of_request |> string_reques
 
     This is the main entry point of this module.
 *)
-let request_bin_parsed (bin : BytesSeq.t) : trcs = ASM bin |> request |> expect_parsed_traces
+let request_bin_parsed (opcode : opcode) : trcs = ASM opcode |> request |> expect_parsed_traces
 
 (** Send a request without expecting any answer *)
 let send_request req = req |> string_of_request |> send_string_request

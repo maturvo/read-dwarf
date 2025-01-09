@@ -94,7 +94,8 @@ let of_dwarf dwarf = of_elf ~dwarf dwarf.elf
 let load_sym runner (sym : Elf.Symbol.t) =
   info "Loading symbol %s in %s" sym.name runner.elf.filename;
   Vec.add_one runner.funcs sym.addr;
-  let opcode_list = Arch.split_into_instrs sym.data in (* TODO relocations *)
+  debug "Loding symbol %t" (Pp.top Elf.Symbol.pp_raw sym); 
+  let opcode_list = Arch.split_into_instrs sym.data in
   let addr = ref sym.addr in
   List.iter
     (fun Elf.Symbol.{ data = code; relocations } ->
@@ -103,9 +104,10 @@ let load_sym runner (sym : Elf.Symbol.t) =
         addr := Elf.Address.(!addr + len);
         (result, len)
       in
+      debug "Relocation at address %t: %t" (Pp.top Elf.Address.pp addr) (Pp.top Elf.Relocations.pp relocations);
       try
-        let _reloc = Elf.Relocations.IMap.find_opt 0 relocations in
-        let instr = Trace.Cache.get_instr (code, None) in (*TODO relocs*)
+        let reloc = Elf.Relocations.IMap.find_opt 0 relocations in
+        let instr = Trace.Cache.get_instr (code, Option.map (fun (x : Elf.Relocations.rel) -> x.target) reloc) in
         if instr.traces = [] then begin
           debug "Instruction at %t in %s is loaded as special" (Pp.top Elf.Address.pp addr) sym.name;
           Hashtbl.add runner.instrs addr (Special instr_len)

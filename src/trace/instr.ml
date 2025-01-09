@@ -81,7 +81,7 @@ let trace_meta_of_trace trace =
   let jump = ref None in
   let process_var = function
     | Base.Var.Register reg -> read := reg :: !read
-    | Base.Var.(Read _ | NonDet _) -> ()
+    | Base.Var.(Read _ | NonDet _ | Segment _) -> ()
   in
   let process_exp : Base.exp -> unit = Ast.Manip.exp_iter_var process_var in
   let process_event : Base.event -> unit = function

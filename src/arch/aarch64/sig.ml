@@ -363,7 +363,8 @@ let assemble_to_elf instr =
 let split_into_instrs (data: Elf.Symbol.data) = 
   let module IMap = Elf.Relocations.IMap in
   let rawdata = BytesSeq.to_listbs ~len:4 data.data in
-  List.mapi (fun pos bytes -> 
+  List.mapi (fun i bytes ->
+      let pos = 4 * i in 
       let (_, rel, rest) = IMap.split pos data.relocations in
       if Option.is_some @@ IMap.find_first_opt (fun i -> i < pos + 4) rest then
         Raise.fail "Misaligned relocation";      

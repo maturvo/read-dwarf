@@ -186,8 +186,8 @@ let isla_mode_term =
 let isla_mode_to_request imode input =
   match imode with
   | ASM -> Server.TEXT_ASM input
-  | HEX -> Server.ASM (BytesSeq.of_hex input)
-  | BIN -> Server.ASM (BytesSeq.of_string input)
+  | HEX -> Server.ASM (BytesSeq.of_hex input, None) (* TODO? *)
+  | BIN -> Server.ASM (BytesSeq.of_string input, None)
   | _ -> assert false
 
 (** Run isla and return a text trace with a filename

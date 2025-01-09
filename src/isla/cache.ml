@@ -217,8 +217,7 @@ let get_traces (opcode : Server.opcode) : Base.rtrcs =
   | Some trcs -> trcs
   | None ->
       ensure_started ();
-      let raw_opcode, _ = opcode in (*TODO*)
-      let trcs = Server.request_bin_parsed raw_opcode in
+      let trcs = Server.request_bin_parsed opcode in
       let ptrcs = Preprocess.preprocess config trcs in
       IC.add cache (Some opcode) ptrcs;
       ptrcs
@@ -233,7 +232,7 @@ let get_nop () : Base.rtrc =
   | Some _ -> fatal "Corrupted cache, nop hasn't exactly one trace"
   | None ->
       ensure_started ();
-      let (segs, trcs) = Server.request_bin_parsed @@ Arch.nop () in
+      let (segs, trcs) = Server.request_bin_parsed @@ (Arch.nop (), None) in
       assert (Option.is_none segs);
       let trc = List.assoc true trcs in
       IC.add cache None (Traces [trc]);

@@ -142,5 +142,5 @@ let pp_raw sym =
            (* ("addr", ptr sym.addr); *)
            ("size", ptr sym.size);
            ("writable", bool sym.writable);
-           ("data", BytesSeq.ppby ~by:4 sym.data.data ^^ Relocations.pp sym.data.relocations);
+           ("data", pair (BytesSeq.ppby ~by:4) Relocations.pp (sym.data.data, sym.data.relocations));
          ])

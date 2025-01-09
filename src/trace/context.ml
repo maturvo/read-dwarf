@@ -68,13 +68,7 @@ let expand_var ~(ctxt : t) (v : Base.Var.t) (a : Ast.no Ast.ty) : State.exp =
   match v with
   | Register reg -> State.get_reg_exp ctxt.state reg
   | NonDet (i, _) | Read (i, _) -> (HashVector.get ctxt.mem_reads i).exp (* TODO is the NonDet case correct *)
-
-let map_var ~(ctxt : t) (v : Base.Var.t) (a : Ast.no Ast.ty) : State.var =
-  assert (Base.Var.ty v = a);
-  match v with
-  | Register reg -> State.Var.Register (ctxt.state.id, reg)
-  | NonDet (i, size) -> State.Var.NonDet (i, size)
-  | Read (i, size) -> State.Var.ReadVar (ctxt.state.id, i, size)
+  | Segment (_name, size) -> Exp.Typed.bits (BitVec.zero ~size) (* TODO put the actual value there *)
 
 (** Tell if typing should enabled with this context *)
 let typing_enabled ~(ctxt : t) = ctxt.dwarf <> None

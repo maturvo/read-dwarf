@@ -25,8 +25,20 @@ let sub rels off len =
   |> List.filter_map (fun (pos, rel) -> if off <= pos && pos < off + len then Some (pos-off, rel) else None)
   |> IMap.of_list
 
+let pp_rel rel =
+  let target = match rel.target with
+  | AArch64 Abi_aarch64_symbolic_relocation.Data640 -> "Data64"
+  | AArch64 Abi_aarch64_symbolic_relocation.Data320 -> "Data32"
+  | AArch64 Abi_aarch64_symbolic_relocation.ADD -> "ADD"
+  | AArch64 Abi_aarch64_symbolic_relocation.ADRP -> "ADRP"
+  | AArch64 Abi_aarch64_symbolic_relocation.CALL -> "CALL"
+  | AArch64 Abi_aarch64_symbolic_relocation.LDST -> "LDST"
+  in
+  let expr = Elf_symbolic.pp_sym_expr rel.value in
+  Pp.(!^target ^^ !^": " ^^ !^expr)
+
 let pp rels =
   if IMap.is_empty rels then
     Pp.empty
   else
-    Pp.string "(has relocations)"
+    Pp.(mapping "relocations" @@ List.map (fun (i, r) -> (hex i, pp_rel r)) (IMap.to_list rels))

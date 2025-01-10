@@ -81,6 +81,8 @@ let reloc_id: reloc option -> int = function
 
 type opcode = BytesSeq.t * reloc option
 
+type reloc_segment = string * (int * int) (* mapping the name of a segment to the range of the relocation value *)
+
 (** Bump when updating isla.
     TODO: move the version checking to allow a range of version.
     Also, right now the cache invalidation is based on
@@ -223,8 +225,8 @@ let pp_interpreted_opcode (b, r) =
       let bits = BytesSeq.getbvle ~size:32 b 0 in
       Pp.(
         match rtype with
-        | Abi_aarch64_symbolic_relocation.Data640 -> Raise.fail "64bit relocation not allowed for instruction"
-        | Abi_aarch64_symbolic_relocation.Data320 -> !^"x:32"
+        | Abi_aarch64_symbolic_relocation.Data640 -> fatal "Data64 relocation not allowed for instruction"
+        | Abi_aarch64_symbolic_relocation.Data320 -> fatal "Data32 relocation not allowed for instruction"
         | Abi_aarch64_symbolic_relocation.ADRP -> 
             BitVec.pp_smt (BitVec.extract 31 31 bits)  
             ^^ !^" x0:2 " ^^
@@ -243,6 +245,15 @@ let pp_interpreted_opcode (b, r) =
             BitVec.pp_smt (BitVec.extract 26 31 bits)  
             ^^ !^" x0:26 "
       )
+
+(* for interpreting the segments *)
+let segments_of_reloc: reloc -> reloc_segment list = function
+| Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data640 -> fatal "invalid relocation for instructions (Data64)"
+| Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data320 -> fatal "invalid relocation for instructions (Data32)"
+| Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADRP -> ["x0", (0, 1); "x1", (2, 20)] (* or absolute? ["x0", (12, 13); "x1", (14, 32)] *)
+| Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADD -> ["x0", (0, 11)]
+| Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.LDST -> ["x0", (0, 9)] (* TODO depends on load size *) (* or absolute? ["x0", (2, 11)] *)
+| Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL -> ["x0", (0, 25)] (* or absolute? ["x0", (2, 27)] *)
 
 (** Convert a request into the string message expected by isla-client
     This should match the protocol *)

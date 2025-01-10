@@ -171,4 +171,7 @@ let get_traces (opcode : Isla.Server.opcode) : Base.t list =
 
 (** Get a full blown {!Instr} from the opcode, going through the whole Isla pipeline
     if necessary.*)
-let get_instr (opcode : Isla.Server.opcode) : Instr.t = Instr.of_traces opcode @@ get_traces opcode
+let get_instr (opcode : BytesSeq.t * Elf.Relocations.rel option) : Instr.t =
+  let raw_opcode, reloc = opcode in
+  let reloc_target = Option.map (fun (x : Elf.Relocations.rel) -> x.target) reloc in
+  Instr.of_traces opcode @@ get_traces (raw_opcode, reloc_target)

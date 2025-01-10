@@ -107,7 +107,7 @@ let load_sym runner (sym : Elf.Symbol.t) =
       debug "Relocation at address %t: %t" (Pp.top Elf.Address.pp addr) (Pp.top Elf.Relocations.pp relocations);
       try
         let reloc = Elf.Relocations.IMap.find_opt 0 relocations in
-        let instr = Trace.Cache.get_instr (code, Option.map (fun (x : Elf.Relocations.rel) -> x.target) reloc) in
+        let instr = Trace.Cache.get_instr (code, reloc) in
         if instr.traces = [] then begin
           debug "Instruction at %t in %s is loaded as special" (Pp.top Elf.Address.pp addr) sym.name;
           Hashtbl.add runner.instrs addr (Special instr_len)
@@ -193,7 +193,7 @@ let skip runner state : State.t list =
     let pc = pc_exp |> Ast.expect_bits |> BitVec.to_int in
     let pc = Elf.Address.{ section = ".text"; offset = pc } in (* TODO this is wrong, should get symbolic value from pc_exp *)
     match fetch runner pc with
-    | Normal { traces = _; read = _; written = _; length; opcode = _ }
+    | Normal { traces = _; read = _; written = _; length; opcode = _; segments = _ }
      |Special length
      |IslaFail length ->
         let state = State.copy_if_locked state in

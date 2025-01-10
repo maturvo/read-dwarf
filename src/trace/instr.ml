@@ -60,13 +60,16 @@ type trace_meta = {
   written : Reg.t list;
 }
 
+module SMap = Map.Make (String)
+
 (** A full instruction representation *)
 type t = {
   traces : trace_meta list;
   length : int;  (** Bytes length *)
   read : Reg.t list;
   written : Reg.t list;
-  opcode : Isla.Server.opcode;
+  opcode : BytesSeq.t;
+  segments: Elf.Relocations.exp SMap.t
 }
 
 let dedup_regs = List.sort_uniq State.Reg.compare
@@ -99,17 +102,31 @@ let trace_meta_of_trace trace =
   { trace; jump_target = !jump; read = dedup_regs !read; written = dedup_regs !written }
 
 (** Generate full instruction data from a list of traces *)
-let of_traces opcode traces =
+let of_traces (opcode: BytesSeq.t * Elf.Relocations.rel option) traces =
   let traces = List.map trace_meta_of_trace traces in
-  let raw_opcode, _ = opcode in
-  let length = BytesSeq.length raw_opcode in
+  let opcode, reloc = opcode in
+  let length = BytesSeq.length opcode in
   let read = dedup_regs @@ List.concat_map (fun (tr : trace_meta) -> tr.read) traces in
   let written = dedup_regs @@ List.concat_map (fun (tr : trace_meta) -> tr.written) traces in
-  { traces; length; read; written; opcode }
+
+  let segments = match reloc with
+  | None -> SMap.empty
+  | Some reloc ->
+      reloc.target
+      |> Isla.Server.segments_of_reloc
+      |> List.map (fun (v, (lo, hi)) -> (v, Elf.Relocations.Mask(reloc.value, hi, lo)))
+      |> SMap.of_list
+  in
+  { traces; length; read; written; opcode; segments }
 
 (** Pretty print the representation of an instruction *)
 let pp instr =
   let open Pp in
+  (prefix 4 1 !^"Segments:" @@
+    separate_map hardline
+      (pair string Elf.Relocations.pp_exp)
+      (SMap.to_list instr.segments))
+  ^^ hardline ^^
   separate_mapi hardline
     (fun i trc -> prefix 4 1 (dprintf "Trace %d:" i) (Base.pp trc.trace))
     instr.traces

@@ -165,12 +165,13 @@ let fetch (runner : t) (pc : Elf.Address.t) : slot =
 let execute_normal ?(prelock = ignore) ~pc runner (instr : Trace.Instr.t) state =
   let dwarf = runner.dwarf in
   let next = instr.length in
+  let segments_map = instr.segments in
   let run_pure () =
     List.map
       (fun (trc : Trace.Instr.trace_meta) ->
         let nstate = State.copy state in
         State.set_last_pc nstate pc;
-        Trace.Run.trace_pc_mut ?dwarf ~next nstate trc.trace;
+        Trace.Run.trace_pc_mut ?dwarf ~segments_map ~next nstate trc.trace;
         nstate)
       instr.traces
   in
@@ -178,7 +179,7 @@ let execute_normal ?(prelock = ignore) ~pc runner (instr : Trace.Instr.t) state 
     match instr.traces with
     | [trc] ->
         State.set_last_pc state pc;
-        Trace.Run.trace_pc_mut ?dwarf ~next state trc.trace;
+        Trace.Run.trace_pc_mut ?dwarf ~segments_map ~next state trc.trace;
         [state]
     | _ ->
         prelock state;

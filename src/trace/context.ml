@@ -48,19 +48,33 @@
     should be added here
 *)
 
+module SMap = Map.Make (String)
+
 (** The context to run a trace *)
 type t = {
   reg_writes : (State.Reg.t * State.tval) Vec.t;  (** Stores the delayed register writes *)
   mem_reads : State.tval HashVector.t;  (** Stores the result of memory reads *)
   state : State.t;
+  segments : State.exp SMap.t;
   dwarf : Dw.t option;  (** Optionally DWARF information. If present, typing is enabled *)
 }
 
+let rec exp_of_relocation: Elf.Relocations.exp -> State.exp = 
+  let f = exp_of_relocation in function
+  | Section _ -> Exp.Typed.bits (BitVec.zero ~size:64) (* TODO put the actual value there, size? *)
+  | Const x -> Exp.Typed.bits (BitVec.of_int x ~size:64) (* TODO size? *)
+  | BinOp (a, Add, b) -> Exp.Typed.(f a + f b)
+  | BinOp (a, Sub, b) -> Exp.Typed.(f a - f b)
+  | BinOp (a, And, b) -> Exp.Typed.manyop (AstGen.Ott.Bvmanyarith AstGen.Ott.Bvand) [f a; f b]
+  | UnOp (Not, b) -> Exp.Typed.unop AstGen.Ott.Bvnot (f b)
+  | Mask (x, last, first) -> Exp.Typed.extract ~last ~first (f x)
+
 (** Build a {!context} from a state *)
-let make_context ?dwarf state =
+let make_context ?dwarf ?segments_map state =
   let reg_writes = Vec.empty () in
   let mem_reads = HashVector.empty () in
-  { state; reg_writes; mem_reads; dwarf }
+  let segments = segments_map |> Option.value ~default:SMap.empty |> SMap.map exp_of_relocation in
+  { state; reg_writes; mem_reads; dwarf; segments }
 
 (** Expand a Trace variable to a State expression, using the context *)
 let expand_var ~(ctxt : t) (v : Base.Var.t) (a : Ast.no Ast.ty) : State.exp =
@@ -68,7 +82,7 @@ let expand_var ~(ctxt : t) (v : Base.Var.t) (a : Ast.no Ast.ty) : State.exp =
   match v with
   | Register reg -> State.get_reg_exp ctxt.state reg
   | NonDet (i, _) | Read (i, _) -> (HashVector.get ctxt.mem_reads i).exp (* TODO is the NonDet case correct *)
-  | Segment (_name, size) -> Exp.Typed.bits (BitVec.zero ~size) (* TODO put the actual value there *)
+  | Segment (name, _) -> SMap.find name ctxt.segments (* TODO put the actual value there *)
 
 (** Tell if typing should enabled with this context *)
 let typing_enabled ~(ctxt : t) = ctxt.dwarf <> None

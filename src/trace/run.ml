@@ -114,17 +114,17 @@ let event_mut ~(ctxt : ctxt) (event : Base.event) =
   | Assert exp -> State.push_assert ctxt.state (expand ~ctxt exp)
 
 (** Run a trace on the provided state by mutation. Enable typing if [dwarf] is provided *)
-let trace_mut ?dwarf (state : State.t) (events : Base.t) : unit =
+let trace_mut ?dwarf ?segments_map (state : State.t) (events : Base.t) : unit =
   assert (not @@ State.is_locked state);
   info "Running trace with typing %s" (if dwarf <> None then "on" else "off");
-  let ctxt = Context.make_context ?dwarf state in
+  let ctxt = Context.make_context ?dwarf ?segments_map state in
   List.iter (event_mut ~ctxt) events;
   Vec.iter (fun (reg, tval) -> State.Reg.Map.set state.regs reg tval) ctxt.reg_writes
 
 (** Run a trace on the provided state by returning an updated copy.*)
-let trace ?dwarf (start : State.t) (events : Base.t) : State.t =
+let trace ?dwarf ?segments_map (start : State.t) (events : Base.t) : State.t =
   let state = State.copy start in
-  trace_mut ?dwarf state events;
+  trace_mut ?dwarf ?segments_map state events;
   State.lock state;
   state
 
@@ -133,12 +133,12 @@ let trace ?dwarf (start : State.t) (events : Base.t) : State.t =
 
     Thus this function automatically handle moving the PC for fall-through instruction
 *)
-let trace_pc_mut ?dwarf ~(next : int) (state : State.t) (events : Base.t) : unit =
+let trace_pc_mut ?dwarf ?segments_map ~(next : int) (state : State.t) (events : Base.t) : unit =
   let pc = Arch.pc () in
   let rec is_touching_pc : Base.t -> bool = function
     | [] -> false
     | WriteReg { reg; _ } :: _ when reg = pc -> true
     | _ :: l -> is_touching_pc l
   in
-  trace_mut ?dwarf state events;
+  trace_mut ?dwarf ?segments_map state events;
   if is_touching_pc events then State.concretize_pc ~pc state else State.bump_pc ~pc state next

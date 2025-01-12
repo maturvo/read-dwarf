@@ -79,6 +79,16 @@ let reloc_id: reloc option -> int = function
 | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.LDST) -> 5
 | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL) -> 6
 
+let reloc_of_id: int -> reloc option = function
+| 0 -> None
+| 1 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data640)
+| 2 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data320)
+| 3 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADRP)
+| 4 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADD)
+| 5 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.LDST)
+| 6 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL)
+| _ -> Raise.fail "invalid reloc id"
+
 type opcode = BytesSeq.t * reloc option
 
 type reloc_segment = string * (int * int) (* mapping the name of a segment to the range of the relocation value *)

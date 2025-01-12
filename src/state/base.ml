@@ -76,6 +76,8 @@ module Var = struct
     | NonDet of int * Ast.Size.t
         (** Variable representing non-determinism in the spec.
             Can only be bit-vectors of size {8, 16, 32, 64} for now. *)
+    | Section of string
+        (** Symbolic base address of ELF section. Assume 64bit for now. *)
 
   let to_string = function
     | Register (state, reg) ->
@@ -90,6 +92,7 @@ module Var = struct
     | NonDet (num, size) ->
         if size = Ast.Size.B64 then Printf.sprintf "nondet:%i" num
         else Printf.sprintf "nondet:%i:%dbits" num (Ast.Size.to_bits size)
+    | Section s -> "section:"^s
 
   let expect_register = function
     | Register (_, reg) -> reg
@@ -125,6 +128,7 @@ module Var = struct
     | ["arg"; num] -> Arg (int_of_string num)
     | ["retarg"; ""] -> RetArg
     | ["retaddr"; ""] -> RetAddr
+    | ["section"; s] -> Section s
     | _ -> Raise.inv_arg "Invalid state variable: %s" s
 
   let of_reg id reg = Register (id, reg)
@@ -138,6 +142,7 @@ module Var = struct
     | (RetArg, RetArg) -> true
     | (RetAddr, RetAddr) -> true
     | (NonDet (num, size), NonDet (num', size')) -> num = num' && size = size'
+    | (Section s, Section s') -> s = s'
     | _ -> false
 
   let hash = Hashtbl.hash
@@ -153,6 +158,7 @@ module Var = struct
     | RetArg -> Ast.Ty_BitVec 64
     | RetAddr -> Ast.Ty_BitVec 64
     | NonDet (_, size) -> Ast.Ty_BitVec (Ast.Size.to_bits size)
+    | Section _ -> Ast.Ty_BitVec 64
 end
 
 type var = Var.t

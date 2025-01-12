@@ -113,6 +113,8 @@ module Var : sig
     | RetAddr  (** The return address: The address to which a "return" instruction would jump. *)
     | NonDet of int * Ast.Size.t
         (** Variable representing non-determinism in the spec. Can only be a bit-vector for now. *)
+    | Section of string
+    (** Symbolic base address of ELF section. Assume 64bit for now. *)
 
   (** Convert the variable to the string encoding. For parsing infrastructure reason,
       the encoding must always contain at least one [:]. *)

@@ -61,7 +61,7 @@ type t = {
 
 let rec exp_of_relocation: Elf.Relocations.exp -> State.exp = 
   let f = exp_of_relocation in function
-  | Section _ -> Exp.Typed.bits (BitVec.zero ~size:64) (* TODO put the actual value there, size? *)
+  | Section s -> State.Exp.of_var (State.Var.Section s) (* TODO put the actual value there, size? *)
   | Const x -> Exp.Typed.bits (BitVec.of_int x ~size:64) (* TODO size? *)
   | BinOp (a, Add, b) -> Exp.Typed.(f a + f b)
   | BinOp (a, Sub, b) -> Exp.Typed.(f a - f b)

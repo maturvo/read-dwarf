@@ -107,7 +107,7 @@ let run ?(every_instruction = false) ?relevant (b : t) (start : State.t) : label
             State.lock state
           end;
           let states =
-            let pc = pc_exp |> Ast.expect_bits |> BitVec.to_int in
+            let pc = State.Exp.expect_sym_address pc_exp in
             if Option.fold ~none:true ~some:(Fun.flip Hashtbl.mem pc) relevant then (
               info "Running pc %t" (Pp.top State.Exp.pp pc_exp);
               Runner.run ~prelock b.runner state
@@ -148,12 +148,6 @@ let run ?(every_instruction = false) ?relevant (b : t) (start : State.t) : label
     - pc has be seen more than [loop]
 *)
 let gen_endpred ?min ?max ?loop ?(brks = []) () : State.exp -> string option =
-  (* HACK *)
-  (* TODO rewrite for symbolic pc *)
-  let min = Option.map (fun min -> min.Elf.Address.offset) min in
-  let max = Option.map (fun max -> max.Elf.Address.offset) max in
-  let brks = List.map (fun brks -> brks.Elf.Address.offset) brks in
-  (*  *)
   let endnow fmt = Printf.ksprintf Option.some fmt in
   let pchtbl = Hashtbl.create 10 in
   let loop_str =
@@ -164,21 +158,23 @@ let gen_endpred ?min ?max ?loop ?(brks = []) () : State.exp -> string option =
     | Some n -> Printf.sprintf "%d times" n
     | None -> ""
   in
-  function
-  | Ast.Bits (bv, _) -> (
-      let pc = BitVec.to_int bv in
-      debug "enpred: Evaluating PC 0x%x" pc;
+  fun pc_exp ->
+    ( try
+      Some (State.Exp.expect_sym_address pc_exp)
+    with
+      _ -> None
+    ) |> Option.map (fun pc ->
+      debug "enpred: Evaluating PC %t" (Pp.top Elf.Address.pp pc);
       match (min, max, loop) with
-      | (Some min, _, _) when pc < min -> endnow "PC 0x%x was below min 0x%x" pc min
-      | (_, Some max, _) when pc >= max -> endnow "PC 0x%x was above max 0x%x" pc max
-      | _ when List.exists (( = ) pc) brks -> endnow "PC 0x%x hit a breakpoint" pc
+      | (Some min, _, _) when Elf.Address.(pc < min) <> Some false -> endnow "PC %t was below min %t" Pp.(tos Elf.Address.pp pc) Pp.(tos Elf.Address.pp min)
+      | (_, Some max, _) when Elf.Address.(pc >= max) <> Some false -> endnow "PC %t was above max %t" Pp.(tos Elf.Address.pp pc) Pp.(tos Elf.Address.pp max)
+      | _ when List.exists (( = ) pc) brks -> endnow "PC %t hit a breakpoint" Pp.(tos Elf.Address.pp pc)
       | (_, _, Some loop) ->
           let current_num = Hashtbl.find_opt pchtbl pc |> Option.value ~default:0 in
-          if current_num >= loop then endnow "PC 0x%x had been seen more than %s" pc loop_str
+          if current_num >= loop then endnow "PC %t had been seen more than %s" Pp.(tos Elf.Address.pp pc) loop_str
           else begin
             Hashtbl.replace pchtbl pc (current_num + 1);
             None
           end
       | _ -> None
-    )
-  | exp -> endnow "PC %t is symbolic" Pp.(tos State.Exp.pp exp)
+    ) |> Option.value_fun ~default:(fun () -> endnow "PC %t is symbolic" Pp.(tos State.Exp.pp pc_exp))

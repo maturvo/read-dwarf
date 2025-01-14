@@ -191,8 +191,7 @@ let execute_normal ?(prelock = ignore) ~pc runner (instr : Trace.Instr.t) state 
 let skip runner state : State.t list =
   let pc_exp = State.get_reg_exp state runner.pc in
   try
-    let pc = pc_exp |> Ast.expect_bits |> BitVec.to_int in
-    let pc = Elf.Address.{ section = ".text"; offset = pc } in (* TODO this is wrong, should get symbolic value from pc_exp *)
+    let pc = State.Exp.expect_sym_address pc_exp in
     match fetch runner pc with
     | Normal { traces = _; read = _; written = _; length; opcode = _; segments = _ }
      |Special length
@@ -224,8 +223,7 @@ let skip runner state : State.t list =
 let run ?prelock runner state : State.t list =
   let pc_exp = State.get_reg_exp state runner.pc in
   try
-    let pc = pc_exp |> Ast.expect_bits |> BitVec.to_int in
-    let pc = Elf.Address.{ section = ".text"; offset = pc } in (* TODO this is wrong, should get symbolic value from pc_exp *)
+    let pc = State.Exp.expect_sym_address pc_exp in
     match fetch runner pc with
     | Normal instr -> execute_normal ?prelock ~pc runner instr state
     | Special _ ->

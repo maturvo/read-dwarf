@@ -158,6 +158,8 @@ module Exp : sig
 
   (** Create an expression from an register and a state id *)
   val of_reg : id -> Reg.t -> t
+
+  val expect_sym_address : t -> Elf.Address.t
 end
 
 type exp = Exp.t

@@ -172,6 +172,15 @@ module Exp = struct
   include Exp.Make (Var)
 
   let of_reg id reg = Var.of_reg id reg |> of_var
+
+  let expect_sym_address exp =
+    let sym, conc = Exp.Sums.split_concrete exp in
+    let section = match sym with
+    | Some(Ast.Var (Var.Section s, _)) -> s
+    | _ -> Raise.fail "Expected symbolic Section base"
+    in
+    let offset = BitVec.to_int conc in
+    Elf.Address.{ section; offset }
 end
 
 type exp = Exp.t
@@ -507,16 +516,19 @@ let set_pc ~(pc : Reg.t) (s : t) (pcval : int) =
 
 (* TODO *)
 let set_pc_sym ~(pc : Reg.t) (s : t) (pcval : Elf.Address.t) =
-  set_pc ~pc s pcval.offset
+  (* set_pc ~pc s pcval.offset *)
+  let exp = Typed.(var ~typ:(Ty_BitVec 64) (Var.Section pcval.section) + bits_int ~size:64 pcval.offset) in
+  let ctyp = Ctype.of_frag (Ctype.Global ".text") ~offset:pcval.offset ~constexpr:true in
+  set_reg s pc @@ Tval.make ~ctyp exp
   
 
 let bump_pc ~(pc : Reg.t) (s : t) (bump : int) =
   let pc_exp = get_reg_exp s pc in
-  assert (ConcreteEval.is_concrete pc_exp);
-  let old_pc = ConcreteEval.eval pc_exp |> Value.expect_bv |> BitVec.to_int in
-  let new_pc = old_pc + bump in
-  set_pc ~pc s new_pc
+  let old_pc = Exp.expect_sym_address pc_exp in
+  let new_pc = Elf.Address.(old_pc + bump) in
+  set_pc_sym ~pc s new_pc
 
+(* TODO section + offset *)
 let concretize_pc ~(pc : Reg.t) (s : t) =
   let pc_exp = get_reg_exp s pc in
   try ConcreteEval.eval pc_exp |> Value.expect_bv |> BitVec.to_int |> set_pc ~pc s

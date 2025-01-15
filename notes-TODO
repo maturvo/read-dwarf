@@ -3,3 +3,7 @@ Symbolic symbol table
 - can probably keep the same api, but addresses are symbolic
 
 Instruction fetch: is it sound? (rewriting .text)
+
+Z3 finding unique solution
+- Get model -> assert not model -> check now it is unsat
+- Need to extend the protocol probably

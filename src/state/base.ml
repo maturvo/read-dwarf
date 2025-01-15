@@ -163,6 +163,8 @@ end
 
 type var = Var.t
 
+module Z3St = Z3.Make (Var)
+
 module Sums = Exp.Sums
 module Typed = Exp.Typed
 module ConcreteEval = Exp.ConcreteEval
@@ -474,6 +476,9 @@ let read ~provenance ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t 
   Option.value exp ~default:(Exp.of_var var)
 
 let read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
+  (* let addr = Z3St.simplify_full addr in *)
+  let sym, conc = Sums.split_concrete addr in
+  debug "Address: %t + %t" Pp.(top (optional Exp.pp) sym) Pp.(top BitVec.pp_smt conc);
   if ConcreteEval.is_concrete addr || Vec.length s.mem.frags = 0 then
     read ~provenance:Ctype.Main ?ctyp s ~addr ~size
   else Raise.fail "Trying to access %t in state %d: No provenance info" Pp.(tos Exp.pp addr) s.id

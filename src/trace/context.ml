@@ -82,7 +82,8 @@ let expand_var ~(ctxt : t) (v : Base.Var.t) (a : Ast.no Ast.ty) : State.exp =
   match v with
   | Register reg -> State.get_reg_exp ctxt.state reg
   | NonDet (i, _) | Read (i, _) -> (HashVector.get ctxt.mem_reads i).exp (* TODO is the NonDet case correct *)
-  | Segment (name, _) -> SMap.find name ctxt.segments (* TODO put the actual value there *)
+  | Segment (name, _) -> SMap.find name ctxt.segments (*TODO put the actual value there*)
+  (* | Segment (name, sz) -> Exp.Typed.extract ~first:0 ~last:(sz-1) (State.Exp.of_var (State.Var.Section name)) TODO put the actual value there *)
 
 (** Tell if typing should enabled with this context *)
 let typing_enabled ~(ctxt : t) = ctxt.dwarf <> None

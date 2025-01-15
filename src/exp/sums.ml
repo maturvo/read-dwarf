@@ -42,6 +42,10 @@
 (*                                                                                  *)
 (*==================================================================================*)
 
+open Logs.Logger (struct
+  let str = __MODULE__
+end)
+
 (* The documentation is in the mli file *)
 
 let rec split =
@@ -59,6 +63,20 @@ let rec split =
       let l' = split e' in
       let rl' = List.rev_map Typed.neg l' in
       List.rev_append rl' l
+  | Manyop (Concat, l, _) ->
+      let all_splits = List.map split l in
+      let defaults = List.map (fun e ->
+        let size = e |> Typed.get_type |> Typed.expect_bv in
+        Typed.bits_int ~size 0
+      ) l in
+      let terms = List.transpose ~defaults all_splits in
+      List.map Typed.concat terms
+  | Unop (ZeroExtend m, e, _) ->
+      let l = split e in
+      List.map (Typed.unop (ZeroExtend m)) l
+  | Unop (SignExtend s, e, _) ->
+      let l = split e in
+      List.map (Typed.unop (SignExtend s)) l
   | e -> [e]
 
 let merge ~size l = if l = [] then Typed.zero ~size else Typed.sum l
@@ -88,6 +106,8 @@ let smart_substract ~equal ~term exp =
 let split_concrete exp =
   let size = Typed.expect_bv (Typed.get_type exp) in
   let terms = split exp in
+  debug "Split:";
+  List.iter (fun t -> debug "\t%t" Pp.(top (PpExp.pp_exp (fun _ -> !^"var")) t)) terms;
   let (symterms, concvals) = List.partition_map ConcreteEval.eval_if_concrete terms in
   let concbvs = List.map Value.expect_bv concvals in
   let concbv = List.fold_left BitVec.( + ) (BitVec.zero ~size) concbvs in

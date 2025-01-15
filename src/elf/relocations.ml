@@ -13,29 +13,41 @@ type exp =
 | BinOp of (exp * binary_operation * exp)
 | UnOp of (unary_operation * exp)
 (* | AssertRange of (exp * int * int) *)
-| Mask of (exp * int * int)
+(* | Mask of (exp * int * int) *)
 
 type rel = {
   target : target;
   value : exp;
+  range: (int64 * int64) option;
+  mask : int * int;
 }
 
 type t = rel IMap.t
 
 type linksem_t = LinksemRelocatable.rels
 
-let rec exp_of_linksem = function
-| Elf_symbolic.Section s -> Section s
-| Elf_symbolic.Const x -> Const (Z.to_int x)
-| Elf_symbolic.BinOp (x, op, y) -> BinOp (exp_of_linksem x, op, exp_of_linksem y)
-| Elf_symbolic.UnOp (op, x) -> UnOp (op, exp_of_linksem x)
-| Elf_symbolic.AssertRange (x, _, _) -> exp_of_linksem x (* TODO *)
-| Elf_symbolic.Mask (x, a, b) -> Mask (exp_of_linksem x, Z.to_int a, Z.to_int b)
+let exp_of_linksem =
+  let rec value_of_linksem = function
+  | Elf_symbolic.Section s -> Section s
+  | Elf_symbolic.Const x -> Const (Z.to_int x)
+  | Elf_symbolic.BinOp (x, op, y) -> BinOp (value_of_linksem x, op, value_of_linksem y)
+  | Elf_symbolic.UnOp (op, x) -> UnOp (op, value_of_linksem x)
+  | Elf_symbolic.AssertRange (_, _, _) -> Raise.fail "AssertRange should not occur in value expression"
+  | Elf_symbolic.Mask (_, _, _) -> Raise.fail "AssertRange should not occur in value expression"
+  in function
+  | Elf_symbolic.Mask (e, hi, lo) ->
+      let e, range = match e with
+      | Elf_symbolic.AssertRange (e, min, max) -> e, Some (Z.to_int64 min, Z.to_int64 max)
+      | e -> e, None
+      in
+      fun target -> {target; range; mask = (Z.to_int hi, Z.to_int lo); value = value_of_linksem e}
+  | _ -> Raise.fail "Expression does not have Mask in top level"
+
 
 let of_linksem: linksem_t -> t = function
 | LinksemRelocatable.AArch64 relocs ->
     let add k Elf_symbolic.{ arel_value; arel_target } m =
-      IMap.add (Z.to_int k) { value = exp_of_linksem arel_value; target = AArch64 arel_target } m
+      IMap.add (Z.to_int k) (exp_of_linksem arel_value (AArch64 arel_target)) m
     in
     Pmap.fold add relocs IMap.empty
 
@@ -53,7 +65,6 @@ let rec pp_exp = Pp.(
   | BinOp (a, Sub, b) -> !^"(" ^^ pp_exp a ^^ !^"-" ^^ pp_exp b ^^ !^")"
   | BinOp (a, And, b) -> !^"(" ^^ pp_exp a ^^ !^"&" ^^ pp_exp b ^^ !^")"
   | UnOp (Not, b) -> !^"(" ^^ !^"~" ^^ pp_exp b ^^ !^")"
-  | Mask (x, a, b) -> pp_exp x ^^ !^"[" ^^ int a ^^ !^":" ^^ int b ^^ !^"]"
 )
 
 let pp_target = Pp.(function
@@ -65,7 +76,8 @@ let pp_target = Pp.(function
 | AArch64 Abi_aarch64_symbolic_relocation.LDST -> !^"LDST")
 
 let pp_rel rel =
-  Pp.(pp_target rel.target ^^ !^": " ^^ pp_exp rel.value)
+  let hi, lo = rel.mask in
+  Pp.(pp_target rel.target ^^ !^": " ^^ pp_exp rel.value ^^ !^"[" ^^ int hi ^^ !^":" ^^ int lo ^^ !^"]")
 
 let pp rels =
   if IMap.is_empty rels then

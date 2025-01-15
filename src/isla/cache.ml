@@ -79,6 +79,25 @@ type config = Server.config
 module Opcode (*: Cache.Key *) = struct
   type t = Server.opcode option
 
+  let reloc_id: Relocation.t option -> int = function
+  | None -> 0
+  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data640) -> 1
+  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data320) -> 2
+  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADRP) -> 3
+  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADD) -> 4
+  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.LDST) -> 5
+  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL) -> 6
+
+  let reloc_of_id: int -> Relocation.t option = function
+  | 0 -> None
+  | 1 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data640)
+  | 2 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data320)
+  | 3 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADRP)
+  | 4 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADD)
+  | 5 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.LDST)
+  | 6 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL)
+  | _ -> Raise.fail "invalid reloc id"
+
   let equal a b =
     match (a, b) with
     | (None, None) -> true
@@ -93,7 +112,7 @@ module Opcode (*: Cache.Key *) = struct
     | Some (bs, rel) ->
         let i = BytesSeq.getintle_ze bs 0 in
         let l = BytesSeq.length bs in
-        let rel_id = Server.reloc_id rel in
+        let rel_id = reloc_id rel in
         if small_enough bs rel_id then begin
           assert (not @@ IntBits.get i IntBits.back);
           let res = IntBits.blit l 0 i (IntBits.back - 3) 3 in
@@ -105,7 +124,7 @@ module Opcode (*: Cache.Key *) = struct
   let to_file _file = function
     | None -> ()
     | Some (bs, rel) ->
-        let rel_id = Server.reloc_id rel in
+        let rel_id = reloc_id rel in
         if small_enough bs rel_id then ()
         else
           Raise.todo()
@@ -120,7 +139,7 @@ module Opcode (*: Cache.Key *) = struct
       let size = IntBits.sub hash (IntBits.back - 3) 3 in
       let b = Bytes.create size in
       Bits.unsafe_blit_of_int data 0 b 0 (size * 8);
-      Some (BytesSeq.of_bytes b, Server.reloc_of_id reloc_id)
+      Some (BytesSeq.of_bytes b, reloc_of_id reloc_id)
 end
 
 (** Representation of trace lists on disk.

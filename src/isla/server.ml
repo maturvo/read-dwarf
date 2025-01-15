@@ -68,30 +68,8 @@ type config = Config.t
     processor exception/fault) or not *)
 type trcs = Base.instruction_segments option * (bool * Base.rtrc) list
 
-type reloc = Elf.Relocations.target
+type opcode = BytesSeq.t * Relocation.t option
 
-let reloc_id: reloc option -> int = function
-| None -> 0
-| Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data640) -> 1
-| Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data320) -> 2
-| Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADRP) -> 3
-| Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADD) -> 4
-| Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.LDST) -> 5
-| Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL) -> 6
-
-let reloc_of_id: int -> reloc option = function
-| 0 -> None
-| 1 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data640)
-| 2 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data320)
-| 3 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADRP)
-| 4 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADD)
-| 5 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.LDST)
-| 6 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL)
-| _ -> Raise.fail "invalid reloc id"
-
-type opcode = BytesSeq.t * reloc option
-
-type reloc_segment = string * (int * int) (* mapping the name of a segment to the range of the relocation value *)
 
 (** Bump when updating isla.
     TODO: move the version checking to allow a range of version.
@@ -228,48 +206,11 @@ let pp_answer = function
 (** The type of a request to isla *)
 type request = TEXT_ASM of string | ASM of opcode | VERSION | STOP
 
-let pp_interpreted_opcode (b, r) =
-  match r with
-  | None -> Pp.(!^"#x" ^^ BytesSeq.ppint b)
-  | Some (Elf.Relocations.AArch64 rtype) ->
-      let bits = BytesSeq.getbvle ~size:32 b 0 in
-      Pp.(
-        match rtype with
-        | Abi_aarch64_symbolic_relocation.Data640 -> fatal "Data64 relocation not allowed for instruction"
-        | Abi_aarch64_symbolic_relocation.Data320 -> fatal "Data32 relocation not allowed for instruction"
-        | Abi_aarch64_symbolic_relocation.ADRP -> 
-            BitVec.pp_smt (BitVec.extract 31 31 bits)  
-            ^^ !^" x0:2 " ^^
-            BitVec.pp_smt (BitVec.extract 24 28 bits)
-            ^^ !^" x1:19 " ^^
-            BitVec.pp_smt (BitVec.extract 0 4 bits)
-        | Abi_aarch64_symbolic_relocation.ADD -> 
-            BitVec.pp_smt (BitVec.extract 22 31 bits)  
-            ^^ !^" x0:12 " ^^
-            BitVec.pp_smt (BitVec.extract 0 9 bits)
-        | Abi_aarch64_symbolic_relocation.LDST -> (* TODO different width loads, alignment *) 
-            BitVec.pp_smt (BitVec.extract 22 31 bits)  
-            ^^ !^" x0:10 " ^^
-            BitVec.pp_smt (BitVec.extract 0 11 bits)
-        | Abi_aarch64_symbolic_relocation.CALL -> 
-            BitVec.pp_smt (BitVec.extract 26 31 bits)  
-            ^^ !^" x0:26 "
-      )
-
-(* for interpreting the segments *)
-let segments_of_reloc: reloc -> reloc_segment list = function
-| Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data640 -> fatal "invalid relocation for instructions (Data64)"
-| Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data320 -> fatal "invalid relocation for instructions (Data32)"
-| Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADRP -> ["x0", (0, 1); "x1", (2, 20)] (* or absolute? ["x0", (12, 13); "x1", (14, 32)] *)
-| Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADD -> ["x0", (0, 11)]
-| Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.LDST -> ["x0", (0, 9)] (* TODO depends on load size *) (* or absolute? ["x0", (2, 11)] *)
-| Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL -> ["x0", (0, 25)] (* or absolute? ["x0", (2, 27)] *)
-
 (** Convert a request into the string message expected by isla-client
     This should match the protocol *)
 let string_of_request = function
   | TEXT_ASM s -> Printf.sprintf "execute_asm %s" s
-  | ASM b -> Pp.(sprintc @@ !^"execute " ^^ pp_interpreted_opcode b)
+  | ASM b -> Pp.(sprintc @@ !^"execute " ^^ Relocation.pp_opcode_with_segments b)
   | VERSION -> "version"
   | STOP -> "stop"
 

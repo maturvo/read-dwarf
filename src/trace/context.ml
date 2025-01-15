@@ -48,6 +48,10 @@
     should be added here
 *)
 
+open Logs.Logger (struct
+  let str = __MODULE__
+end)
+
 module SMap = Map.Make (String)
 
 (** The context to run a trace *)
@@ -59,21 +63,43 @@ type t = {
   dwarf : Dw.t option;  (** Optionally DWARF information. If present, typing is enabled *)
 }
 
-let rec exp_of_relocation: Elf.Relocations.exp -> State.exp = 
-  let f = exp_of_relocation in function
+let rec exp_of_relocation_exp: Elf.Relocations.exp -> State.exp = 
+  let f = exp_of_relocation_exp in function
   | Section s -> State.Exp.of_var (State.Var.Section s) (* TODO put the actual value there, size? *)
   | Const x -> Exp.Typed.bits (BitVec.of_int x ~size:64) (* TODO size? *)
   | BinOp (a, Add, b) -> Exp.Typed.(f a + f b)
   | BinOp (a, Sub, b) -> Exp.Typed.(f a - f b)
   | BinOp (a, And, b) -> Exp.Typed.manyop (AstGen.Ott.Bvmanyarith AstGen.Ott.Bvand) [f a; f b]
   | UnOp (Not, b) -> Exp.Typed.unop AstGen.Ott.Bvnot (f b)
-  | Mask (x, last, first) -> Exp.Typed.extract ~last ~first (f x)
+  (* | Mask (x, last, first) -> Exp.Typed.extract ~last ~first (f x) *)
 
 (** Build a {!context} from a state *)
-let make_context ?dwarf ?segments_map state =
+let make_context ?dwarf ?relocation state =
   let reg_writes = Vec.empty () in
   let mem_reads = HashVector.empty () in
-  let segments = segments_map |> Option.value ~default:SMap.empty |> SMap.map exp_of_relocation in
+
+  let segments = relocation
+    |> Option.map (fun relocation ->
+      let open Elf.Relocations in
+      let value = exp_of_relocation_exp relocation.value in
+      Option.iter (fun (min, max) ->
+          let min = Exp.Typed.bits @@ BitVec.of_z ~size:64 @@ Z.of_int64 min in
+          let max = Exp.Typed.bits @@ BitVec.of_z ~size:64 @@ Z.of_int64 max in
+          let cond1 = Exp.Typed.(binop (Bvcomp Bvsle) min value) in
+          let cond2 = Exp.Typed.(binop (Bvcomp Bvslt) value max) in
+          let cond = Exp.Typed.(manyop And [cond1; cond2]) in
+          State.push_assert state cond;
+      ) relocation.range;
+      let (last, first) = relocation.mask in
+      let masked = Exp.Typed.extract ~first ~last value in
+
+      relocation.target
+      |> Isla.Relocation.segments_of_reloc
+      |> SMap.of_list
+      |> SMap.map (fun (first, last) -> Exp.Typed.extract ~first ~last masked)
+    )
+    |> Option.value ~default:SMap.empty
+  in
   { state; reg_writes; mem_reads; dwarf; segments }
 
 (** Expand a Trace variable to a State expression, using the context *)

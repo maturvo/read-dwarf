@@ -73,6 +73,7 @@ let commands =
     Run.Block.command;
     (* Run.FuncRD.command; *)
     CopySourcesCmd.command;
+    Z3.Test.command;
   ]
 
 let _ = Printexc.record_backtrace Config.enable_backtrace

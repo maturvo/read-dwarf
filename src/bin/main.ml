@@ -74,6 +74,7 @@ let commands =
     (* Run.FuncRD.command; *)
     Other_cmds.CopySourcesCmd.command;
     (* BranchTable.command; *)
+    Z3.Test.command;
   ]
 
 let _ = Printexc.record_backtrace Config.enable_backtrace

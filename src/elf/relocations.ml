@@ -15,10 +15,14 @@ type exp =
 (* | AssertRange of (exp * int * int) *)
 (* | Mask of (exp * int * int) *)
 
+type assertion =
+| Range of int64 * int64
+| Alignment of int
+
 type rel = {
   target : target;
   value : exp;
-  range: (int64 * int64) option;
+  assertions: assertion list;
   mask : int * int;
 }
 
@@ -33,14 +37,18 @@ let exp_of_linksem =
   | Elf_symbolic.BinOp (x, op, y) -> BinOp (value_of_linksem x, op, value_of_linksem y)
   | Elf_symbolic.UnOp (op, x) -> UnOp (op, value_of_linksem x)
   | Elf_symbolic.AssertRange (_, _, _) -> Raise.fail "AssertRange should not occur in value expression"
+  | Elf_symbolic.AssertAlignment (_, _) -> Raise.fail "AssertAlignment should not occur in value expression"
   | Elf_symbolic.Mask (_, _, _) -> Raise.fail "AssertRange should not occur in value expression"
   in function
   | Elf_symbolic.Mask (e, hi, lo) ->
-      let e, range = match e with
-      | Elf_symbolic.AssertRange (e, min, max) -> e, Some (Z.to_int64 min, Z.to_int64 max)
-      | e -> e, None
-      in
-      fun target -> {target; range; mask = (Z.to_int hi, Z.to_int lo); value = value_of_linksem e}
+      let rec extract_asserts e =
+        match e with
+        | Elf_symbolic.AssertRange (e, min, max) -> let (e, a) = extract_asserts e in e, Range (Z.to_int64 min, Z.to_int64 max) :: a
+        | Elf_symbolic.AssertAlignment (e, bits) -> let (e, a) = extract_asserts e in e, Alignment (Z.to_int bits) :: a
+        | e -> e, []
+        in
+      let e, assertions = extract_asserts e in
+      fun target -> {target; assertions; mask = (Z.to_int hi, Z.to_int lo); value = value_of_linksem e}
   | _ -> Raise.fail "Expression does not have Mask in top level"
 
 

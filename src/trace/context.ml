@@ -82,22 +82,25 @@ let make_context ?dwarf ?relocation state =
     |> Option.map (fun relocation ->
       let open Elf.Relocations in
       let value = exp_of_relocation_exp relocation.value in
-      Option.iter (fun (min, max) ->
+      List.iter (function
+        | Range (min, max) ->
           let min = Exp.Typed.bits @@ BitVec.of_z ~size:64 @@ Z.of_int64 min in
           let max = Exp.Typed.bits @@ BitVec.of_z ~size:64 @@ Z.of_int64 max in
           let cond1 = Exp.Typed.(binop (Bvcomp Bvsle) min value) in
           let cond2 = Exp.Typed.(binop (Bvcomp Bvslt) value max) in
-          let cond = Exp.Typed.(manyop And [cond1; cond2]) in
-          State.push_assert state cond;
-      ) relocation.range;
+          State.push_relocation_assert state Exp.Typed.(manyop And [cond1; cond2])
+        | Alignment b ->
+          let last = b-1 in
+          State.push_relocation_assert state Exp.Typed.(extract ~first:0 ~last value = bits_int ~size:b 0)
+      ) relocation.assertions;
       let (last, first) = relocation.mask in
       let masked = Exp.Typed.extract ~first ~last value in
-
+      
       relocation.target
       |> Isla.Relocation.segments_of_reloc
       |> SMap.of_list
       |> SMap.map (fun (first, last) -> Exp.Typed.extract ~first ~last masked)
-    )
+      )
     |> Option.value ~default:SMap.empty
   in
   { state; reg_writes; mem_reads; dwarf; segments }

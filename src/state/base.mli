@@ -288,6 +288,7 @@ type t = private {
   mutable regs : Tval.t Reg.Map.t;  (** The values and types of registers *)
   read_vars : Tval.t Vec.t;  (** The results of reads made since base state *)
   mutable asserts : exp list;  (** Only asserts since base_state *)
+  mutable relocation_asserts : exp list;  (** Only asserts since base_state *)
   mem : Mem.t;
   elf : Elf.File.t option;
       (** Optionally an ELF file, this may be used when running instructions on
@@ -389,6 +390,9 @@ val copy_if_locked : ?elf:Elf.File.t -> t -> t
 
 (** Add an assertion to a state *)
 val push_assert : t -> exp -> unit
+
+(** Add an assertion to a state *)
+val push_relocation_assert : t -> exp -> unit
 
 (** Set a state to be impossible (single [false] assert). *)
 val set_impossible : t -> unit

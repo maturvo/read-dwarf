@@ -326,6 +326,7 @@ type t = {
   mutable regs : Tval.t Reg.Map.t;  (** The values and types of registers *)
   read_vars : Tval.t Vec.t;  (** The results of reads made since base state *)
   mutable asserts : exp list;  (** Only asserts since base_state *)
+  mutable relocation_asserts : exp list;  (** Only asserts since base_state *)
   mem : Mem.t;
   elf : Elf.File.t option;
       (** Optionally an ELF file, this may be used when running instructions on
@@ -368,6 +369,7 @@ let make ?elf () =
       regs = Reg.Map.init @@ Tval.of_reg id;
       read_vars = Vec.empty ();
       asserts = [];
+      relocation_asserts = [];
       mem = Mem.empty ();
       elf;
       fenv = Fragment.Env.make ();
@@ -389,6 +391,7 @@ let copy ?elf state =
       regs = Reg.Map.copy state.regs;
       read_vars = Vec.empty ();
       asserts = (if locked then [] else state.asserts);
+      relocation_asserts = (if locked then [] else state.relocation_asserts);
       mem = (if locked then Mem.from state.mem else Mem.copy state.mem);
       elf = Option.(elf ||| state.elf);
       fenv = Fragment.Env.copy state.fenv;
@@ -404,6 +407,13 @@ let copy_if_locked ?elf state = if is_locked state then copy ?elf state else sta
 let push_assert (s : t) (e : exp) =
   assert (not @@ is_locked s);
   s.asserts <- e :: s.asserts
+
+let push_relocation_assert (s : t) (e : exp) =
+  assert (not @@ is_locked s);
+  s.relocation_asserts <- e :: s.relocation_asserts
+
+let rec load_relocation_asserts (s : t) =
+  s.relocation_asserts @ (s.base_state |> Option.map load_relocation_asserts |> Option.value ~default:[])
 
 let set_asserts state asserts =
   assert (not @@ is_locked state);
@@ -476,7 +486,8 @@ let read ~provenance ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t 
   Option.value exp ~default:(Exp.of_var var)
 
 let read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
-  (* let addr = Z3St.simplify_full addr in *)
+  let hyps = load_relocation_asserts s in
+  let addr = Z3St.simplify_subterms_full ~hyps addr in
   let sym, conc = Sums.split_concrete addr in
   debug "Address: %t + %t" Pp.(top (optional Exp.pp) sym) Pp.(top BitVec.pp_smt conc);
   if ConcreteEval.is_concrete addr || Vec.length s.mem.frags = 0 then

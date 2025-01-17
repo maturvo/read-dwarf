@@ -67,14 +67,14 @@ type label =
   | Start  (** Root node of the tree *)
   | End of string
       (** Lead node of the tree, the string describe which end condition has be triggered *)
-  | BranchAt of int  (** A Branching node at a given PC *)
-  | NormalAt of int  (** A normal instruction at PC. Exists only if [every_instruction] is true *)
+  | BranchAt of Elf.Address.t  (** A Branching node at a given PC *)
+  | NormalAt of Elf.Address.t  (** A normal instruction at PC. Exists only if [every_instruction] is true *)
 
 let label_to_string = function
   | Start -> "Start"
   | End s -> Printf.sprintf "End (%s)" s
-  | BranchAt pc -> Printf.sprintf "Branch at 0x%x" pc
-  | NormalAt pc -> Printf.sprintf "Normal at 0x%x" pc
+  | BranchAt pc -> Printf.sprintf "Branch at %t" Pp.(tos Elf.Address.pp pc)
+  | NormalAt pc -> Printf.sprintf "Normal at %t" Pp.(tos Elf.Address.pp pc)
 
 let pp_label label = label |> label_to_string |> Pp.string
 
@@ -123,11 +123,11 @@ let run ?(every_instruction = false) ?relevant (b : t) (start : State.t) : label
           | [state] when not every_instruction -> run_from state
           | [nstate] when every_instruction ->
               let rest = [run_from nstate] in
-              { state; data = NormalAt (pc_exp |> Ast.expect_bits |> BitVec.to_int); rest }
+              { state; data = NormalAt (State.Exp.expect_sym_address pc_exp); rest }
           | states ->
               let rest = List.map run_from states in
               State.Tree.
-                { state; data = BranchAt (pc_exp |> Ast.expect_bits |> BitVec.to_int); rest }
+                { state; data = BranchAt (State.Exp.expect_sym_address pc_exp); rest }
         )
     else begin
       info "Reached dead code at %t" (Pp.top State.Exp.pp pc_exp);
@@ -162,7 +162,7 @@ let gen_endpred ?min ?max ?loop ?(brks = []) () : State.exp -> string option =
     ( try
       Some (State.Exp.expect_sym_address pc_exp)
     with
-      _ -> None
+      _ -> debug "PC is sus"; None
     ) |> Option.map (fun pc ->
       debug "enpred: Evaluating PC %t" (Pp.top Elf.Address.pp pc);
       match (min, max, loop) with

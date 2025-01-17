@@ -485,15 +485,45 @@ let read ~provenance ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t 
   Option.iter (set_read s (Var.expect_readvar var)) exp;
   Option.value exp ~default:(Exp.of_var var)
 
-let read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
+let address_to_exp ~(size : int) (addr : Elf.Address.t) =
+  let first = 0 in
+  let last = size - 1 in
+  Typed.(
+    extract ~last ~first
+      (Exp.of_var @@ Var.Section addr.section)
+    +
+    bits_int ~size addr.offset
+  )
+
+let eval_address (s : t) (addr: Exp.t) : Elf.Address.t option =
+  let ctxt0 = function Var.Section _ -> Value.bv @@ BitVec.of_int ~size:64 0 | _ -> raise ConcreteEval.Symbolic in
+  let offset = addr |> ConcreteEval.eval ~ctxt:ctxt0 |> Value.expect_bv |> BitVec.to_int in
+  let sections = Hashtbl.create 10 in
+  Ast.Manip.exp_iter_var (function Var.Section s -> Hashtbl.add sections s () | _ -> ()) addr;
+
   let hyps = load_relocation_asserts s in
-  let addr = Z3St.simplify_subterms_full ~hyps addr in
-  let addr = Z3St.simplify_full addr in
-  let sym, conc = Sums.split_concrete addr in
-  debug "Address: %t + %t" Pp.(top (optional Exp.pp) sym) Pp.(top BitVec.pp_smt conc);
-  if ConcreteEval.is_concrete addr || Vec.length s.mem.frags = 0 then
-    read ~provenance:Ctype.Main ?ctyp s ~addr ~size
-  else Raise.fail "Trying to access %t in state %d: No provenance info" Pp.(tos Exp.pp addr) s.id
+  let size = addr |> Typed.get_type |> Typed.expect_bv in
+  sections |> Hashtbl.to_seq_keys |> Seq.find_map (fun section ->
+    let address = Elf.Address.{ section; offset } in
+    let expression = address_to_exp ~size address in
+    if Z3St.check_full ~hyps Typed.(expression = addr) = Some true then
+      Some address
+    else
+      None
+  )
+  
+
+let read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
+  let elf_addr = eval_address s addr in
+  debug "Address: %t" Pp.(top (optional Elf.Address.pp) elf_addr);
+  match elf_addr with
+  | Some elf_addr ->
+      let addr_size = addr |> Typed.get_type |> Typed.expect_bv in
+      let addr = address_to_exp ~size:addr_size elf_addr in
+      read ~provenance:Ctype.Main ?ctyp s ~addr ~size
+  | None when Vec.length s.mem.frags = 0 ->
+      read ~provenance:Ctype.Main ?ctyp s ~addr ~size
+  | None -> Raise.fail "Trying to access %t in state %d: No provenance info" Pp.(tos Exp.pp addr) s.id
 
 let write ~provenance (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.t) : unit =
   assert (not @@ is_locked s);

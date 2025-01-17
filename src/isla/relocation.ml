@@ -26,9 +26,9 @@ let pp_opcode_with_segments (b, r) =
             ^^ !^" x0:12 " ^^
             BitVec.pp_smt (BitVec.extract 0 9 bits)
         | Abi_aarch64_symbolic_relocation.LDST -> (* TODO different width loads, alignment *) 
-            BitVec.pp_smt (BitVec.extract 22 31 bits)  
+            BitVec.pp_smt (BitVec.extract 20 31 bits)  
             ^^ !^" x0:10 " ^^
-            BitVec.pp_smt (BitVec.extract 0 11 bits)
+            BitVec.pp_smt (BitVec.extract 0 9 bits)
         | Abi_aarch64_symbolic_relocation.CALL -> 
             BitVec.pp_smt (BitVec.extract 26 31 bits)  
             ^^ !^" x0:26 "

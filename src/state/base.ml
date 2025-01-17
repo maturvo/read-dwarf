@@ -488,6 +488,7 @@ let read ~provenance ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t 
 let read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
   let hyps = load_relocation_asserts s in
   let addr = Z3St.simplify_subterms_full ~hyps addr in
+  let addr = Z3St.simplify_full addr in
   let sym, conc = Sums.split_concrete addr in
   debug "Address: %t + %t" Pp.(top (optional Exp.pp) sym) Pp.(top BitVec.pp_smt conc);
   if ConcreteEval.is_concrete addr || Vec.length s.mem.frags = 0 then

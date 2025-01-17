@@ -530,9 +530,16 @@ let write ~provenance (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.
   Mem.write ~provenance s.mem ~addr ~size ~exp:value
 
 let write_noprov (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.t) : unit =
-  if ConcreteEval.is_concrete addr || Vec.length s.mem.frags = 0 then
-    write ~provenance:Ctype.Main s ~addr ~size value
-  else Raise.fail "Trying to access %t in state %d: No provenance info" Pp.(tos Exp.pp addr) s.id
+  let elf_addr = eval_address s addr in
+  debug "Address: %t" Pp.(top (optional Elf.Address.pp) elf_addr);
+  match elf_addr with
+  | Some elf_addr ->
+      let addr_size = addr |> Typed.get_type |> Typed.expect_bv in
+      let addr = address_to_exp ~size:addr_size elf_addr in
+      write ~provenance:Ctype.Main s ~addr ~size value
+  | None when Vec.length s.mem.frags = 0 ->
+      write ~provenance:Ctype.Main s ~addr ~size value
+  | None -> Raise.fail "Trying to access %t in state %d: No provenance info" Pp.(tos Exp.pp addr) s.id
 
 let reset_reg (s : t) ?(ctyp : Ctype.t option) (reg : Reg.t) : unit =
   assert (not @@ is_locked s);

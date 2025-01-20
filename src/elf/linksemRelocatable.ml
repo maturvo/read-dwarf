@@ -51,7 +51,20 @@ let get_elf64_file_global_symbol_init (f: Elf_file.elf64_file) : global_symbol_i
             else
               Byte_sequence.offset_and_cut addr_offset size section.elf64_section_body
             in
-            Error.bind (get_relocs section.elf64_section_name_as_string) @@ fun relocs ->
+            Error.bind (get_relocs section.elf64_section_name_as_string) @@ fun (AArch64 relocs) ->
+              let relocs = relocs
+              |> Pmap.bindings_list
+              |> List.fold_left (fun m (pos, r) ->
+                  let sz = size in
+                  let open Z in
+                  let open Compare in
+                  if pos >= addr_offset && pos < addr_offset + sz then
+                    Pmap.add (pos - addr_offset) r m
+                  else
+                    m
+                ) (Pmap.empty Z.compare)
+              |> fun x -> AArch64 x
+              in
             Error.bind data @@ fun data ->
               Error.bind (String_table.get_string_at name strtab) @@ fun str ->
                 let write = Elf_file.flag_is_set Elf_section_header_table.shf_write section.elf64_section_flags in

@@ -63,16 +63,6 @@ type t = {
   dwarf : Dw.t option;  (** Optionally DWARF information. If present, typing is enabled *)
 }
 
-let rec exp_of_relocation_exp: Elf.Relocations.exp -> State.exp = 
-  let f = exp_of_relocation_exp in function
-  | Section s -> State.Exp.of_var (State.Var.Section s) (* TODO put the actual value there, size? *)
-  | Const x -> Exp.Typed.bits (BitVec.of_int x ~size:64) (* TODO size? *)
-  | BinOp (a, Add, b) -> Exp.Typed.(f a + f b)
-  | BinOp (a, Sub, b) -> Exp.Typed.(f a - f b)
-  | BinOp (a, And, b) -> Exp.Typed.manyop (AstGen.Ott.Bvmanyarith AstGen.Ott.Bvand) [f a; f b]
-  | UnOp (Not, b) -> Exp.Typed.unop AstGen.Ott.Bvnot (f b)
-  (* | Mask (x, last, first) -> Exp.Typed.extract ~last ~first (f x) *)
-
 (** Build a {!context} from a state *)
 let make_context ?dwarf ?relocation state =
   let reg_writes = Vec.empty () in
@@ -80,26 +70,13 @@ let make_context ?dwarf ?relocation state =
 
   let segments = relocation
     |> Option.map (fun relocation ->
-      let open Elf.Relocations in
-      let value = exp_of_relocation_exp relocation.value in
-      List.iter (function
-        | Range (min, max) ->
-          let min = Exp.Typed.bits @@ BitVec.of_z ~size:64 @@ Z.of_int64 min in
-          let max = Exp.Typed.bits @@ BitVec.of_z ~size:64 @@ Z.of_int64 max in
-          let cond1 = Exp.Typed.(binop (Bvcomp Bvsle) min value) in
-          let cond2 = Exp.Typed.(binop (Bvcomp Bvslt) value max) in
-          State.push_relocation_assert state Exp.Typed.(manyop And [cond1; cond2])
-        | Alignment b ->
-          let last = b-1 in
-          State.push_relocation_assert state Exp.Typed.(extract ~first:0 ~last value = bits_int ~size:b 0)
-      ) relocation.assertions;
-      let (last, first) = relocation.mask in
-      let masked = Exp.Typed.extract ~first ~last value in
-      
-      relocation.target
+      let State.Relocation.{value;asserts;target} = State.Relocation.of_elf relocation in
+      List.iter (State.push_relocation_assert state) asserts;
+
+      target
       |> Isla.Relocation.segments_of_reloc
       |> SMap.of_list
-      |> SMap.map (fun (first, last) -> Exp.Typed.extract ~first ~last masked)
+      |> SMap.map (fun (first, last) -> Exp.Typed.extract ~first ~last value)
       )
     |> Option.value ~default:SMap.empty
   in

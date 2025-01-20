@@ -160,6 +160,10 @@ module Exp : sig
   val of_reg : id -> Reg.t -> t
 
   val expect_sym_address : t -> Elf.Address.t
+
+  val of_section : size:int -> string -> t
+
+  val of_address : size:int -> Elf.Address.t -> t
 end
 
 type exp = Exp.t
@@ -192,6 +196,18 @@ module Tval : sig
 end
 
 type tval = Tval.t
+
+module Relocation : sig
+    type t = {
+        value: Exp.t;
+        asserts: Exp.t list;
+        target: Elf.Relocations.target;
+    }
+
+    val of_elf : Elf.Relocations.rel -> t
+
+    val exp_of_data : Elf.Symbol.data -> (exp * exp list)
+end
 
 (** {1 State memory management } *)
 

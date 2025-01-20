@@ -183,6 +183,18 @@ module Exp = struct
     in
     let offset = BitVec.to_int conc in
     Elf.Address.{ section; offset }
+  
+  let of_section ~(size : int) (section : string) =
+    Typed.extract ~last:(size-1) ~first:0
+        (of_var @@ Var.Section section)
+
+
+  let of_address ~(size : int) (addr : Elf.Address.t) =
+    Typed.(
+      of_section ~size addr.section
+      +
+      bits_int ~size addr.offset
+    )
 end
 
 type exp = Exp.t
@@ -216,17 +228,71 @@ end
 
 type tval = Tval.t
 
-let section_to_exp ~(size : int) (section : string) =
-  Typed.extract ~last:(size-1) ~first:0
-      (Exp.of_var @@ Var.Section section)
+module Relocation = struct
+  type t = {
+    value: Exp.t;
+    asserts: Exp.t list;
+    target: Elf.Relocations.target;
+  }
 
+  let rec exp_of_relocation_exp: Elf.Relocations.exp -> exp = 
+    let f = exp_of_relocation_exp in function
+    | Section s -> Exp.of_var (Var.Section s) (* TODO size? *)
+    | Const x -> Typed.bits (BitVec.of_int x ~size:64) (* TODO size? *)
+    | BinOp (a, Add, b) -> Typed.(f a + f b)
+    | BinOp (a, Sub, b) -> Typed.(f a - f b)
+    | BinOp (a, And, b) -> Typed.manyop (AstGen.Ott.Bvmanyarith AstGen.Ott.Bvand) [f a; f b]
+    | UnOp (Not, b) -> Typed.unop AstGen.Ott.Bvnot (f b)
 
-let address_to_exp ~(size : int) (addr : Elf.Address.t) =
-  Typed.(
-    section_to_exp ~size addr.section
-    +
-    bits_int ~size addr.offset
-  )
+  let of_elf (relocation: Elf.Relocations.rel) = 
+    let open Elf.Relocations in
+    let value = exp_of_relocation_exp relocation.value in
+    let asserts = List.map (function
+      | Range (min, max) ->
+        let min = Typed.bits @@ BitVec.of_z ~size:64 @@ Z.of_int64 min in
+        let max = Typed.bits @@ BitVec.of_z ~size:64 @@ Z.of_int64 max in
+        let cond1 = Typed.(binop (Bvcomp Bvsle) min value) in
+        let cond2 = Typed.(binop (Bvcomp Bvslt) value max) in
+        Typed.(manyop And [cond1; cond2])
+      | Alignment b ->
+        let last = b-1 in
+        Typed.(extract ~first:0 ~last value = bits_int ~size:b 0)
+    ) relocation.assertions in
+    let (last, first) = relocation.mask in
+    let value = Typed.extract ~first ~last value in
+    { value; asserts; target = relocation.target }
+
+  module IMap = Map.Make (Int)
+
+  let exp_of_data (data : Elf.Symbol.data) =
+    let size = 8 * (BytesSeq.length data.data) in
+    (* Assume little endian here *)
+    let bv = BytesSeq.getbvle ~size data.data 0 in
+    let exp = Typed.bits bv in
+    IMap.fold (fun offset rel (exp, asserts) ->
+      let relocation = of_elf rel in
+      let pos = 8 * offset in
+      let width = match relocation.target with
+      | AArch64 Abi_aarch64_symbolic_relocation.Data640 -> 64
+      | AArch64 Abi_aarch64_symbolic_relocation.Data320 -> 32
+      | _ -> Raise.fail "Unsopported relocation"
+      in
+      let before = if pos > 0 then
+        [Typed.extract ~first:0 ~last:(pos-1) exp]
+      else
+        []
+      in
+      let after = if pos + width < size then
+        [Typed.extract ~first:(pos+width) ~last:(size-1) exp]
+      else
+        []
+      in
+      (
+        Typed.concat (before @ relocation.value :: after),
+        relocation.asserts @ asserts
+      )
+    ) data.relocations (exp, [])
+end
 
 module Mem = struct
   module Size = Ast.Size
@@ -346,7 +412,7 @@ module Mem = struct
       info "Fragment for section %s already exists" section;
       prov
     | None ->
-      let base = section_to_exp ~size:addr_size section in
+      let base = Exp.of_section ~size:addr_size section in
       let prov = new_frag mem base in
       Hashtbl.replace mem.sections section prov;
       prov
@@ -441,15 +507,6 @@ let copy ?elf state =
 
 let copy_if_locked ?elf state = if is_locked state then copy ?elf state else state
 
-let init_sections ~addr_size state =
-  let state = copy_if_locked state in
-  let _ = Option.(
-    let+ elf = state.elf in
-    Elf.SymTable.iter elf.symbols @@ fun sym ->
-      let _ = Mem.create_section_frag ~addr_size state.mem sym.addr.section in ()
-  ) in
-  state
-
 let push_assert (s : t) (e : exp) =
   assert (not @@ is_locked s);
   s.asserts <- e :: s.asserts
@@ -468,6 +525,21 @@ let set_asserts state asserts =
 let set_impossible state =
   assert (not @@ is_locked state);
   state.asserts <- [Typed.false_]
+
+let init_sections ~addr_size state =
+  let state = copy_if_locked state in
+  let _ = Option.(
+    let+ elf = state.elf in
+    Elf.SymTable.iter elf.symbols @@ fun sym ->
+      if sym.typ = Elf.Symbol.OBJECT then
+        let provenance = Mem.create_section_frag ~addr_size state.mem sym.addr.section in
+        let addr = Exp.of_address ~size:addr_size sym.addr in
+        let size = Ast.Size.of_bytes sym.size in
+        let (exp, asserts) = Relocation.exp_of_data sym.data in
+        Mem.write ~provenance state.mem ~addr ~size ~exp;
+        List.iter (push_relocation_assert state) asserts;
+  ) in
+  state
 
 let map_mut_exp (f : exp -> exp) s : unit =
   assert (not @@ is_locked s);
@@ -542,7 +614,7 @@ let eval_address (s : t) (addr: Exp.t) : Elf.Address.t option =
   let size = addr |> Typed.get_type |> Typed.expect_bv in
   sections |> Hashtbl.to_seq_keys |> Seq.find_map (fun section ->
     let address = Elf.Address.{ section; offset } in
-    let expression = address_to_exp ~size address in
+    let expression = Exp.of_address ~size address in
     if Z3St.check_full ~hyps Typed.(expression = addr) = Some true then
       Some address
     else
@@ -556,7 +628,7 @@ let read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
   match elf_addr with
   | Some elf_addr ->
       let addr_size = addr |> Typed.get_type |> Typed.expect_bv in
-      let addr = address_to_exp ~size:addr_size elf_addr in
+      let addr = Exp.of_address ~size:addr_size elf_addr in
       let provenance = Mem.get_section_provenance s.mem elf_addr.section in
       read ~provenance ?ctyp s ~addr ~size
   | None when Vec.length s.mem.frags = 0 ->
@@ -573,7 +645,7 @@ let write_noprov (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.t) : 
   match elf_addr with
   | Some elf_addr ->
       let addr_size = addr |> Typed.get_type |> Typed.expect_bv in
-      let addr = address_to_exp ~size:addr_size elf_addr in
+      let addr = Exp.of_address ~size:addr_size elf_addr in
       let provenance = Mem.get_section_provenance s.mem elf_addr.section in
       write ~provenance s ~addr ~size value
   | None when Vec.length s.mem.frags = 0 ->

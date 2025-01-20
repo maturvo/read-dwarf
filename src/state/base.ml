@@ -216,6 +216,18 @@ end
 
 type tval = Tval.t
 
+let section_to_exp ~(size : int) (section : string) =
+  Typed.extract ~last:(size-1) ~first:0
+      (Exp.of_var @@ Var.Section section)
+
+
+let address_to_exp ~(size : int) (addr : Elf.Address.t) =
+  Typed.(
+    section_to_exp ~size addr.section
+    +
+    bits_int ~size addr.offset
+  )
+
 module Mem = struct
   module Size = Ast.Size
 
@@ -231,20 +243,28 @@ module Mem = struct
 
       In general the stack will be the fragment 0 but this is not guaranteed.
       Some execution contexts may even not have any stacks.*)
-  type t = { mutable main : Fragment.t; frags : (Exp.t * Fragment.t) Vec.t }
+  type t = {
+    mutable main : Fragment.t;
+    frags : (Exp.t * Fragment.t) Vec.t;
+    sections : (string, provenance) Hashtbl.t; (* mapping sections to their fragments *)
+  }
 
   (** Get the main fragment of memory *)
-  let get_main { main; frags = _ } = main
+  let get_main { main; frags = _; sections = _ } = main
 
   (** Empty memory, every address is unbound *)
-  let empty () = { main = Fragment.empty; frags = Vec.empty () }
+  let empty () = { main = Fragment.empty; frags = Vec.empty (); sections = Hashtbl.create 10 }
 
   (** Build a new memory from the old one by keeping the old one as a base *)
   let from mem =
-    { main = Fragment.from mem.main; frags = Vec.map (Pair.map Fun.id Fragment.from) mem.frags }
+    { 
+      main = Fragment.from mem.main;
+      frags = Vec.map (Pair.map Fun.id Fragment.from) mem.frags;
+      sections = Hashtbl.copy mem.sections; 
+    }
 
   (** Copy the memory so that it can be mutated separately *)
-  let copy mem = { main = mem.main; frags = Vec.copy mem.frags }
+  let copy mem = { main = mem.main; frags = Vec.copy mem.frags; sections = Hashtbl.copy mem.sections }
 
   (** Add a new fragment with the specified base *)
   let new_frag mem base =
@@ -312,11 +332,28 @@ module Mem = struct
           Vec.ppi
             (fun (base, frag) -> Pp.infix 2 1 colon (Exp.pp base) (Fragment.pp_raw frag))
             mem.frags );
+        ("sections", hashtbl string Ctype.pp_provenance mem.sections)
       ]
 
   (** Check is this memory is empty which means all addresses are undefined *)
   let is_empty mem =
     Fragment.is_empty mem.main && Vec.for_all (Pair.for_all Fun.ctrue Fragment.is_empty) mem.frags
+
+
+  let create_section_frag ~addr_size mem section =
+    match Hashtbl.find_opt mem.sections section with
+    | Some prov -> 
+      info "Fragment for section %s already exists" section;
+      prov
+    | None ->
+      let base = section_to_exp ~size:addr_size section in
+      let prov = new_frag mem base in
+      Hashtbl.replace mem.sections section prov;
+      prov
+  
+  let get_section_provenance mem section =
+    Hashtbl.find_opt mem.sections section
+    |> Option.value ~default:Ctype.Main
 end
 
 type t = {
@@ -404,6 +441,15 @@ let copy ?elf state =
 
 let copy_if_locked ?elf state = if is_locked state then copy ?elf state else state
 
+let init_sections ~addr_size state =
+  let state = copy_if_locked state in
+  let _ = Option.(
+    let+ elf = state.elf in
+    Elf.SymTable.iter elf.symbols @@ fun sym ->
+      let _ = Mem.create_section_frag ~addr_size state.mem sym.addr.section in ()
+  ) in
+  state
+
 let push_assert (s : t) (e : exp) =
   assert (not @@ is_locked s);
   s.asserts <- e :: s.asserts
@@ -485,15 +531,6 @@ let read ~provenance ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t 
   Option.iter (set_read s (Var.expect_readvar var)) exp;
   Option.value exp ~default:(Exp.of_var var)
 
-let address_to_exp ~(size : int) (addr : Elf.Address.t) =
-  let first = 0 in
-  let last = size - 1 in
-  Typed.(
-    extract ~last ~first
-      (Exp.of_var @@ Var.Section addr.section)
-    +
-    bits_int ~size addr.offset
-  )
 
 let eval_address (s : t) (addr: Exp.t) : Elf.Address.t option =
   let ctxt0 = function Var.Section _ -> Value.bv @@ BitVec.of_int ~size:64 0 | _ -> raise ConcreteEval.Symbolic in
@@ -520,7 +557,8 @@ let read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
   | Some elf_addr ->
       let addr_size = addr |> Typed.get_type |> Typed.expect_bv in
       let addr = address_to_exp ~size:addr_size elf_addr in
-      read ~provenance:Ctype.Main ?ctyp s ~addr ~size
+      let provenance = Mem.get_section_provenance s.mem elf_addr.section in
+      read ~provenance ?ctyp s ~addr ~size
   | None when Vec.length s.mem.frags = 0 ->
       read ~provenance:Ctype.Main ?ctyp s ~addr ~size
   | None -> Raise.fail "Trying to access %t in state %d: No provenance info" Pp.(tos Exp.pp addr) s.id
@@ -536,7 +574,8 @@ let write_noprov (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.t) : 
   | Some elf_addr ->
       let addr_size = addr |> Typed.get_type |> Typed.expect_bv in
       let addr = address_to_exp ~size:addr_size elf_addr in
-      write ~provenance:Ctype.Main s ~addr ~size value
+      let provenance = Mem.get_section_provenance s.mem elf_addr.section in
+      write ~provenance s ~addr ~size value
   | None when Vec.length s.mem.frags = 0 ->
       write ~provenance:Ctype.Main s ~addr ~size value
   | None -> Raise.fail "Trying to access %t in state %d: No provenance info" Pp.(tos Exp.pp addr) s.id

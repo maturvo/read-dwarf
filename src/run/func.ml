@@ -66,7 +66,7 @@ let no_run_prep ~elf:elfname ~name ~entry =
   let abi = Arch.get_abi api in
   Trace.Cache.start @@ Arch.get_isla_config ();
   base "Computing entry state";
-  let start = Init.state () |> State.copy ~elf |> abi.init in
+  let start = Init.state () |> State.copy ~elf |> State.init_sections ~addr_size:Arch.address_size |> abi.init in
   if entry then base "Entry state:\n%t" (Pp.topi State.pp start);
   (dwarf, elf, func, start)
 

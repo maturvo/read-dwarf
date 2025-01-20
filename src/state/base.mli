@@ -386,6 +386,9 @@ val copy : ?elf:Elf.File.t -> t -> t
     The returned state is always unlocked *)
 val copy_if_locked : ?elf:Elf.File.t -> t -> t
 
+val init_sections : addr_size:int -> t -> t
+
+
 (** {1 State convenience manipulation } *)
 
 (** Add an assertion to a state *)

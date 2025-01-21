@@ -606,7 +606,13 @@ let read ~provenance ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t 
 
 let eval_address (s : t) (addr: Exp.t) : Elf.Address.t option =
   let ctxt0 = function Var.Section _ -> Value.bv @@ BitVec.of_int ~size:64 0 | _ -> raise ConcreteEval.Symbolic in
-  let offset = addr |> ConcreteEval.eval ~ctxt:ctxt0 |> Value.expect_bv |> BitVec.to_int in
+  let open Option in
+  let* offset_exp = try
+    Some (ConcreteEval.eval ~ctxt:ctxt0 addr)
+  with
+    ConcreteEval.Symbolic -> None
+  in
+  let offset = offset_exp |> Value.expect_bv |> BitVec.to_int in
   let sections = Hashtbl.create 10 in
   Ast.Manip.exp_iter_var (function Var.Section s -> Hashtbl.add sections s () | _ -> ()) addr;
 
@@ -679,9 +685,7 @@ let set_pc ~(pc : Reg.t) (s : t) (pcval : int) =
   let ctyp = Ctype.of_frag (Ctype.Global ".text") ~offset:pcval ~constexpr:true in
   set_reg s pc @@ Tval.make ~ctyp exp
 
-(* TODO *)
 let set_pc_sym ~(pc : Reg.t) (s : t) (pcval : Elf.Address.t) =
-  (* set_pc ~pc s pcval.offset *)
   let exp = Typed.(var ~typ:(Ty_BitVec 64) (Var.Section pcval.section) + bits_int ~size:64 pcval.offset) in
   let ctyp = Ctype.of_frag (Ctype.Global ".text") ~offset:pcval.offset ~constexpr:true in
   set_reg s pc @@ Tval.make ~ctyp exp
@@ -693,11 +697,8 @@ let bump_pc ~(pc : Reg.t) (s : t) (bump : int) =
   let new_pc = Elf.Address.(old_pc + bump) in
   set_pc_sym ~pc s new_pc
 
-(* TODO section + offset *)
 let concretize_pc ~(pc : Reg.t) (s : t) =
-  let pc_exp = get_reg_exp s pc in
-  try ConcreteEval.eval pc_exp |> Value.expect_bv |> BitVec.to_int |> set_pc ~pc s
-  with ConcreteEval.Symbolic -> ()
+  pc |> get_reg_exp s |> eval_address s |> Option.iter (set_pc_sym ~pc s)
 
 let set_last_pc state pc =
   assert (not @@ is_locked state);

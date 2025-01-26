@@ -58,8 +58,8 @@ let pp_symbol_map (symbol_map : Elf_file.global_symbol_init_info) =
   String.concat ""
     (List.map
        (fun (name, (typ, _size, address, _mb, _binding)) ->
-         Printf.sprintf "**** name = %s  address = %s  typ = %d\n" name (pp_addr address)
-           (Nat_big_num.to_int typ))
+         Printf.sprintf "**** name = %s  address = %s  typ = %d\n" name (pp_addr (Dwarf.Absolute address))
+           (Sym.to_int (Dwarf.Absolute typ)))
        symbol_map)
 
 (*****************************************************************************)

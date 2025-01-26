@@ -574,7 +574,7 @@ let pp_instructions_ranged m test an (low, high) =
   Printf.printf "pp_instructions_ranged indices: low=%i  high=%i \n"   (an.index_of_address low)  (an.index_of_address high);
  *)
   let index_low = an.index_of_address low in
-  let index_high = (an.index_of_address (Nat_big_num.sub high (Nat_big_num.of_int 4)))+1 in
+  let index_high = (an.index_of_address (Sym.sub high (Sym.of_int 4)))+1 in
   let rec subarray_map_to_list f a k k' =
     if k >= k' then [] else f k a.(k) :: subarray_map_to_list f a (k + 1) k'
   in
@@ -619,7 +619,7 @@ let chunks_of_ranged_cu m test an filename_stem ((low, high), cu) =
           pp_abbreviations_table cu'.cu_abbreviations_table );
         ( "die",
           ".debug_info die tree",
-          pp_die c cu'.cu_header d.d_str true (*indent*) (Nat_big_num.of_int 0) true cu'.cu_die );
+          pp_die c cu'.cu_header d.d_str true (*indent*) (Sym.of_int 0) true cu'.cu_die );
         ( "line",
           ".debug_line line number info",
           let lnp = line_number_program_of_compilation_unit d cu' in
@@ -628,13 +628,13 @@ let chunks_of_ranged_cu m test an filename_stem ((low, high), cu) =
           ".debug_line evaluated line info",
           let lnrs = evaluated_line_info_of_compilation_unit d cu' ds.ds_evaluated_line_info in
           pp_line_number_registerss lnrs );
-        ("sdt", "simple die tree", pp_sdt_compilation_unit (Nat_big_num.of_int 0) cu);
+        ("sdt", "simple die tree", pp_sdt_compilation_unit (Sym.of_int 0) cu);
         ( "sdt_globals",
           "simple die tree globals",
-          pp_sdt_globals_compilation_unit (Nat_big_num.of_int 0) cu );
+          pp_sdt_globals_compilation_unit (Sym.of_int 0) cu );
         ( "sdt_locals",
           "simple die tree locals",
-          pp_sdt_locals_compilation_unit (Nat_big_num.of_int 0) cu );
+          pp_sdt_locals_compilation_unit (Sym.of_int 0) cu );
         ("inlined", "inlined subroutine info", pp_inlined_subroutines ds iss);
         ( "inlined_by_range",
           "inlined subroutine info by range",

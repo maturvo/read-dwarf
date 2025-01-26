@@ -140,7 +140,7 @@ let of_linksem (elf : Elf.File.t) (tenv : Ctype.env) (lfun : linksem_t) =
     | None -> (
         match lfun.ss_entry_address with
         | Some a -> (
-            let addr = Elf.Address.{section = ".text"; offset = Nat_big_num.to_int a} in (* TODO this is wrong, need symbolic DWARF *)
+            let addr = Addr.of_sym a in
             match Elf.SymTable.of_addr_opt elf.symbols addr with
             | Some sym -> Some sym
             | None -> None

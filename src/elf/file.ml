@@ -145,7 +145,7 @@ let of_file (filename : string) =
     Segment.
       {
         data;
-        addr = Nat_big_num.to_int addr;
+        addr = Sym.to_int addr; (* TODO *)
         size = BytesSeq.length data;
         read = true;
         write = false;

@@ -619,7 +619,7 @@ let chunks_of_ranged_cu m test an filename_stem ((low, high), cu) =
           pp_abbreviations_table cu'.cu_abbreviations_table );
         ( "die",
           ".debug_info die tree",
-          pp_die c cu'.cu_header d.d_str true (*indent*) (Sym.of_int 0) true cu'.cu_die );
+          pp_die c cu'.cu_header d.d_str true (*indent*) (Nat_big_num.of_int 0) true cu'.cu_die );
         ( "line",
           ".debug_line line number info",
           let lnp = line_number_program_of_compilation_unit d cu' in
@@ -628,13 +628,13 @@ let chunks_of_ranged_cu m test an filename_stem ((low, high), cu) =
           ".debug_line evaluated line info",
           let lnrs = evaluated_line_info_of_compilation_unit d cu' ds.ds_evaluated_line_info in
           pp_line_number_registerss lnrs );
-        ("sdt", "simple die tree", pp_sdt_compilation_unit (Sym.of_int 0) cu);
+        ("sdt", "simple die tree", pp_sdt_compilation_unit (Nat_big_num.of_int 0) cu);
         ( "sdt_globals",
           "simple die tree globals",
-          pp_sdt_globals_compilation_unit (Sym.of_int 0) cu );
+          pp_sdt_globals_compilation_unit (Nat_big_num.of_int 0) cu );
         ( "sdt_locals",
           "simple die tree locals",
-          pp_sdt_locals_compilation_unit (Sym.of_int 0) cu );
+          pp_sdt_locals_compilation_unit (Nat_big_num.of_int 0) cu );
         ("inlined", "inlined subroutine info", pp_inlined_subroutines ds iss);
         ( "inlined_by_range",
           "inlined subroutine info by range",

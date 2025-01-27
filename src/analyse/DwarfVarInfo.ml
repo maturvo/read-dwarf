@@ -246,7 +246,7 @@ let pp_ranged_var (prefix : string) (var : ranged_var) : string =
   let ((n1, n2, ops), (svfp, context)) = var in
   prefix
   ^ pp_sdt_concise_variable_or_formal_parameter_main 0 svfp
-  ^ (let s = Dwarf.pp_parsed_single_location_description (Sym.of_int 0) (n1, n2, ops) in
+  ^ (let s = Dwarf.pp_parsed_single_location_description (Nat_big_num.of_int 0) (n1, n2, ops) in
      String.sub s 0 (String.length s - 1))
   (*hackish stripping of trailing \n from linksem - TODO: fix linksem interface*)
   ^ " "

@@ -142,7 +142,7 @@ let branch_table_target_addresses test filename_branch_table_option : (addr * ad
   let rodata_words : (natural * natural) list = Dwarf.words_of_rel_byte_sequence rodata_addr (Dwarf.rbs_no_reloc bs) [] in (*HACK*)
 
   let read_rodata_b addr =
-    Elf_types_native_uint.natural_of_byte
+    Dwarf.sym_natural_of_byte
       rodata_bytes.(Sym.to_int (Sym.sub addr rodata_addr))
   in
   let read_rodata_h addr =

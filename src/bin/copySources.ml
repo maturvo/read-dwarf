@@ -79,7 +79,7 @@ let process_file () : unit =
       (function
         | lnfe ->
             ( lnh.lnh_comp_dir,
-              (let dir = Nat_big_num.to_int lnfe.lnfe_directory_index in
+              (let dir = Sym.to_int lnfe.lnfe_directory_index in
                if dir = 0 then None
                else
                  Some

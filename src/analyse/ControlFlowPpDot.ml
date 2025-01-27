@@ -204,7 +204,7 @@ let inlining_stack_at_index (an : analysis) k =
               (function
                 | sss' ->
                     String.concat "\n---\n"
-                      (List.map (Dwarf.pp_sdt_subroutine (Sym.of_int 0)) sss'))
+                      (List.map (Dwarf.pp_sdt_subroutine (Nat_big_num.of_int 0)) sss'))
               maximal));
       []
 
@@ -859,12 +859,12 @@ let mk_cfg test an visitedo node_name_prefix (recurse_flat : bool) (_inline_all 
                       match new_ss_O2_ambient_option with
                       | None ->
                           fatal "no call site for\n%s"
-                            (Dwarf.pp_sdt_subroutine (Sym.of_int 0) ss_current)
+                            (Dwarf.pp_sdt_subroutine (Nat_big_num.of_int 0) ss_current)
                       | Some new_ss_O2_ambient -> (
                           match new_ss_O2_ambient.ss_call_site with
                           | None ->
                               fatal "no call site2 for\n%s"
-                                (Dwarf.pp_sdt_subroutine (Sym.of_int 0) ss_current)
+                                (Dwarf.pp_sdt_subroutine (Nat_big_num.of_int 0) ss_current)
                           | Some (_ufe, line, _subprogram_name) -> line
                         )
                       (*,

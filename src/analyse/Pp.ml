@@ -857,7 +857,6 @@ let pp_test_analysis m test an =
       call_graph ^ "* ************* transitive call graph **************\n"
       ^ transitive_call_graph
   | Html ->
-     ""
-     (* "\n* ************* instructions *****************\n" *)
-       (*pp_instruction_init ();
-      String.concat "" (Array.to_list (Array.mapi (pp_instruction m test an 0) an.instructions))*)
+     "\n* ************* instructions *****************\n"
+     ^ (pp_instruction_init ();
+      String.concat "" (Array.to_list (Array.mapi (pp_instruction m test an 0) an.instructions)))

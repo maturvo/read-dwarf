@@ -440,12 +440,21 @@ AArch64:
 let objdump_line_regexp =
   Str.regexp " *\\([0-9a-fA-F]+\\):[ \t]\\([0-9a-fA-F ]+\\)\t\\([^ \r\t\n]+\\) *\\(.*\\)$"
 
+let section_start_line_regexp =
+  Str.regexp "Disassembly of section \\(.*\\):$"
+
 type objdump_instruction =
   natural (*address*) * int list (*opcode bytes*) * string (*mnemonic*) * string
 
 (*args etc*)
 
-let parse_objdump_line (s : string) : objdump_instruction option =
+let parse_section_start s =
+  if Str.string_match section_start_line_regexp s 0 then
+    Some (Str.matched_group 1 s)
+  else
+    None
+
+let parse_objdump_line (s : string) : (int64 * int list * string * string) option =
   let parse_hex_int64 s' =
     try Scanf.sscanf s' "%Lx" (fun i64 -> i64)
     with _ -> fatal "cannot parse address in objdump line %s\n" s
@@ -465,7 +474,6 @@ let parse_objdump_line (s : string) : objdump_instruction option =
   if Str.string_match objdump_line_regexp s 0 then
     begin
       let addr_int64 = parse_hex_int64 (Str.matched_group 1 s) in
-      let addr = Sym.of_int64 addr_int64 in
       let op = Str.matched_group 2 s in
       let op = strip_whitespace op in
       let opcode_byte_strings =
@@ -477,7 +485,7 @@ let parse_objdump_line (s : string) : objdump_instruction option =
       let opcode_bytes = List.map parse_hex_int opcode_byte_strings in
       let mnemonic = Str.matched_group 3 s in
       let operands = Str.matched_group 4 s in
-      Some (addr, opcode_bytes, mnemonic, operands)
+      Some (addr_int64, opcode_bytes, mnemonic, operands)
     end
   else None
 
@@ -486,30 +494,35 @@ let parse_objdump_lines arch lines : objdump_instruction list =
   List.filter_map (parse_objdump_line arch) (Array.to_list lines)
  *)
 
-let rec parse_objdump_lines arch lines (next_index : int) (last_address : natural option) :
+let with_symbolic_address (section: string) (addr, opcode_bytes, mnemonic, operands) : objdump_instruction =
+  (Dwarf.Offset (section, Nat_big_num.of_int64 addr), opcode_bytes, mnemonic, operands)
+
+let rec parse_objdump_lines arch lines (next_index : int) (last_address : int64 option) (section: string option) :
     objdump_instruction list =
   if next_index >= Array.length lines then []
   else
+    let section = Option.fold ~none:section ~some:Option.some @@ parse_section_start lines.(next_index) in
     match parse_objdump_line lines.(next_index) with
     (* skip over unparseable lines *)
-    | None -> parse_objdump_lines arch lines (next_index + 1) last_address
+    | None -> parse_objdump_lines arch lines (next_index + 1) last_address section
     | Some ((addr, _opcode_bytes, _mnemonic, _operands) as i) -> (
+        let mki = with_symbolic_address (Option.get section) in
         match last_address with
-        | None -> i :: parse_objdump_lines arch lines (next_index + 1) (Some addr)
+        | None -> mki i :: parse_objdump_lines arch lines (next_index + 1) (Some addr) section
         | Some last_address' ->
-            let last_address'' = Sym.add last_address' (Sym.of_int 4) in
+            let last_address'' = Int64.add last_address' (Int64.of_int 4) in
             if addr > last_address'' then
               (* fake up "missing" instructions for any gaps in the address space*)
               (*warn "gap in objdump instruction address sequence at %s" (pp_addr last_address'');*)
-              (last_address'', [], "missing", "")
-              :: parse_objdump_lines arch lines next_index (Some last_address'')
-            else i :: parse_objdump_lines arch lines (next_index + 1) (Some addr)
+              mki (last_address'', [], "missing", "")
+              :: parse_objdump_lines arch lines next_index (Some last_address'') section
+            else mki i :: parse_objdump_lines arch lines (next_index + 1) (Some addr) section
       )
 
 let parse_objdump_file arch filename_objdump_d : objdump_instruction array =
   match read_file_lines filename_objdump_d with
   | Error s -> fatal "%s\ncouldn't read objdump-d file: \"%s\"\n" s filename_objdump_d
-  | Ok lines -> Array.of_list (parse_objdump_lines arch lines 0 None)
+  | Ok lines -> Array.of_list (parse_objdump_lines arch lines 0 None None)
 
 (*****************************************************************************)
 (**  parse control-flow instruction asm from objdump and branch table data   *)

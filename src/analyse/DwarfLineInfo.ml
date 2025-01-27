@@ -136,6 +136,7 @@ let split_into_sequences
             | None -> fatal "split_into_sequences found sequence of length 0"
           in
           let last = lnr.lnr_address in
+          (* print_endline (Dwarf.pphex_sym first ^ " " ^ Dwarf.pphex_sym last); *)
           if Sym.equal first last then fatal "split_into_sequences found first=last"
           else ();
           let elis =
@@ -293,7 +294,7 @@ let mk_line_info (eli : Dwarf.evaluated_line_info) instructions :
       let (new_perhaps_relevant, remaining') = mk_new_perhaps_relevant [] remaining_entries in
 
       let addr_in elie =
-        Sym.less_equal elie.elie_first addr && Sym.less_equal addr elie.elie_last
+        Sym.in_range elie.elie_first elie.elie_last addr
       in
 
       let still_active_entries =

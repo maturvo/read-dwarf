@@ -291,7 +291,7 @@ let parse_addr (s : string) : natural =
 try 
   Scanf.sscanf s "0x%Lx" (fun i64 -> Sym.of_int64 i64)
 with
-  Scanf.Scan_failure _  ->
+  (Scanf.Scan_failure _ | End_of_file)  ->
    Scanf.sscanf s "%Lx" (fun i64 -> Sym.of_int64 i64)
 
 let parse_target s =

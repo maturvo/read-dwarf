@@ -22,3 +22,5 @@ let (>) = compare (>)
 let (<=) = compare (<=)
 
 let (>=) = compare (>=)
+
+let to_sym {section; offset} = Dwarf.Offset (section, Z.of_int offset)

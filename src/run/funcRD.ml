@@ -48,14 +48,18 @@
     instructions.*)
 
 open Cmdliner
-(* open Config.CommonOpt *)
-(* open Fun *)
+open Config.CommonOpt
+open Fun
 
 open Logs.Logger (struct
   let str = __MODULE__
 end)
 
-(* let run_func_rd elfname name objdump_d branchtables breakpoints =
+let run_func_rd elfname name objdump_d branchtables breakpoints =
+  match Analyse.Utils.read_file_lines "src/analyse/html-preamble-insts.html" with
+  | Error _ -> ()
+  | Ok lines -> Array.iter (function s -> Printf.printf "%s\n" s) lines
+  ;
   base "Running with rd %s in %s" name elfname;
   base "Loading %s" elfname;
   let dwarf = Dw.of_file elfname in
@@ -70,13 +74,13 @@ end)
   let abi = Arch.get_abi api in
   Trace.Cache.start @@ Arch.get_isla_config ();
   base "Computing entry state";
-  let start = Init.state () |> State.copy ~elf |> abi.init in
+  let start = Init.state () |> State.copy ~elf |> State.init_sections ~addr_size:Arch.address_size |> abi.init in
   base "Loading %s for Analyse" elfname;
   let analyse_test = Analyse.Elf.parse_elf_file elfname in
   base "Analysing %s for Analyse" elfname;
   let analyse_analysis = Analyse.Collected.mk_analysis analyse_test objdump_d branchtables in
   let print_analyse_instruction pc =
-    let pc = Z.of_int pc in
+    let pc = Elf.Address.to_sym pc in
     let index = analyse_analysis.index_of_address pc in
     let instr = analyse_analysis.instructions.(index) in
     Analyse.Pp.pp_instruction Analyse.Types.Html (*Ascii*) analyse_test analyse_analysis 0 index
@@ -98,7 +102,7 @@ end)
       let tree = Block_lib.run ~every_instruction:true block start in
       base "Ended running, start pretty printing";
       (* This table will contain the state diff to print at each pc with a message *)
-      let instr_data : (int, string * State.t * State.Reg.t list) Hashtbl.t =
+      let instr_data : (Elf.Address.t, string * State.t * State.Reg.t list) Hashtbl.t =
         Hashtbl.create 100
       in
       let get_footprint pc =
@@ -113,7 +117,7 @@ end)
               let last_pc = st.last_pc in
               let last_instr_f = get_footprint last_pc in
               let s =
-                if last_pc <> pc - 4 then Printf.sprintf "Coming from 0x%x: " last_pc else ""
+                if Elf.Address.(last_pc + 4 <> pc) then Printf.sprintf "Coming from %t: " Pp.(tos Elf.Address.pp last_pc) else ""
               in
               let regs = List.merge_uniq Stdlib.compare cur_instr_f last_instr_f in
               Hashtbl.add instr_data pc (Printf.sprintf "%sBefore branch" s, st, regs)
@@ -122,27 +126,31 @@ end)
               let last_pc = st.last_pc in
               let last_instr_f = get_footprint last_pc in
               let s =
-                if last_pc <> pc - 4 then Printf.sprintf "Coming from 0x%x: " last_pc else ""
+                if Elf.Address.(last_pc + 4 <> pc) then Printf.sprintf "Coming from %t: " Pp.(tos Elf.Address.pp last_pc) else ""
               in
               let regs = List.merge_uniq Stdlib.compare cur_instr_f last_instr_f in
               Hashtbl.add instr_data pc (Printf.sprintf "%sNormal instruction" s, st, regs)
           | Block_lib.End s ->
               let last_pc = st.last_pc in
               let last_instr = Runner.expect_normal runner last_pc in
-              Hashtbl.add instr_data (st.last_pc + 4)
+              Hashtbl.add instr_data Elf.Address.(st.last_pc + 4)
                 (Printf.sprintf "End because: %s" s, st, Trace.Instr.footprint last_instr))
         tree;
       Vec.iter
         (fun funcaddr ->
           let sym = Elf.SymTable.of_addr elf.symbols funcaddr in
           Analyse.Pp.pp_instruction_init ();
-          Seq.iota_step_up ~start:funcaddr ~step:4 ~endi:(funcaddr + sym.size)
-          |> Seq.iter (fun pc ->
+          Seq.iota_step_up ~start:0 ~step:4 ~endi:sym.size
+          |> Seq.iter (fun pc_diff ->
+                let pc = Elf.Address.(funcaddr + pc_diff) in
                  Hashtbl.find_all instr_data pc
                  |> List.iter (fun (msg, st, regs) ->
-                        base "At 0x%x, %s:\n%t" pc msg Pp.(topi (State.pp_partial ~regs) st));
+                        base "At %t, %s:\n%t" Pp.(top Elf.Address.pp pc) msg Pp.(topi (State.pp_partial ~regs) st));
                  print_string (print_analyse_instruction pc)))
-        runner.funcs *)
+        runner.funcs; 
+  match Analyse.Utils.read_file_lines "src/analyse/html-postamble.html" with
+  | Error _ -> ()
+  | Ok lines -> Array.iter (function s -> Printf.printf "%s\n" s) lines
 
 let elf =
   let doc = "ELF file from which to pull the code" in
@@ -168,7 +176,7 @@ let breakpoints =
   in
   Arg.(value & opt_all string [] & info ["b"; "break"] ~docv:"POSITION" ~doc)
 
-(* let term =
+let term =
   Term.(
     CmdlinerHelper.func_options comopts run_func_rd
     $ elf $ func $ objdump_d $ branch_table $ breakpoints)
@@ -181,4 +189,4 @@ let info =
   in
   Cmd.(info "run-func-rd" ~doc ~exits)
 
-let command = (term, info) *)
+let command = (term, info)

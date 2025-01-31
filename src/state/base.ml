@@ -533,11 +533,16 @@ let init_sections ~addr_size state =
     Elf.SymTable.iter elf.symbols @@ fun sym ->
       if sym.typ = Elf.Symbol.OBJECT then
         let provenance = Mem.create_section_frag ~addr_size state.mem sym.addr.section in
-        let addr = Exp.of_address ~size:addr_size sym.addr in
-        let size = Ast.Size.of_bytes sym.size in
-        let (exp, asserts) = Relocation.exp_of_data sym.data in
-        Mem.write ~provenance state.mem ~addr ~size ~exp;
-        List.iter (push_relocation_assert state) asserts;
+        Seq.iota_step_up ~step:16 ~endi:sym.size
+        |> Seq.iter (fun off ->
+          let len = min 16 (sym.size - off) in
+          let data = Elf.Symbol.sub sym off len in
+          let addr = Exp.of_address ~size:addr_size Elf.Address.(sym.addr + off) in
+          let size = Ast.Size.of_bytes len in
+          let (exp, asserts) = Relocation.exp_of_data data in
+          Mem.write ~provenance state.mem ~addr ~size ~exp;
+          List.iter (push_relocation_assert state) asserts;
+        )
   ) in
   state
 

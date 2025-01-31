@@ -142,6 +142,7 @@ let of_file (filename : string) =
       (* `false' argument is for returning an empty byte-sequence if
          section is not found, instead of throwing an exception *)
     in
+    Printf.printf "%t" Pp.(top Sym.pp addr);
     Segment.
       {
         data;

@@ -72,6 +72,7 @@ let commands =
     Run.Instr.command;
     Run.Block.command;
     Run.FuncRD.command;
+    Run.RelProg.command;
     CopySourcesCmd.command;
     Z3.Test.command;
   ]

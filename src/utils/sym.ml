@@ -2,7 +2,9 @@ type t = Z.t Dwarf.sym0
 
 let pp x = x |> Dwarf.pphex_sym |> Pp.string
 
-let to_int x = Z.to_int @@ Dwarf.sym_unwrap x "to_int"
+let to_z x = Dwarf.sym_unwrap x "to_z"
+
+let to_int x = Z.to_int @@ to_z x
 
 let of_int x = Dwarf.Absolute (Z.of_int x)
 let of_int64 x = Dwarf.Absolute (Z.of_int64 x)

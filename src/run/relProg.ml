@@ -5,6 +5,51 @@ open Logs.Logger (struct
   let str = __MODULE__
 end)
 
+let pp_eval_loc sz st (loc: Dw.Loc.t) : PPrint.document =
+  let value = match loc with
+  | Register reg -> Some (State.get_reg_exp st reg)
+  | RegisterOffset (reg, off) ->
+      let r = State.get_reg_exp st reg in
+      Some (State.read_noprov st ~addr:Exp.Typed.(r + bits_int ~size:Arch.address_size off) ~size:(Ast.Size.of_bytes sz))
+  | StackFrame _off -> 
+      None
+  | Global symoff -> 
+      let addr = Elf.SymTable.to_addr_offset symoff in
+      let addr = State.Exp.of_address ~size:Arch.address_size addr in
+      Some (State.read_noprov st ~addr ~size:(Ast.Size.of_bytes sz))
+  | Const x -> Some(x |> BitVec.of_z ~size:(8*sz) |> Exp.Typed.bits)
+  | Dwarf _ops -> None in
+  Pp.optional State.Exp.pp value
+
+let printvars ~st ~(dwarf: Dw.t) pc =
+  let st = State.copy_if_locked st in
+  let pv vars =
+    Seq.iter (fun (v: Dw.Var.t) -> 
+      let sz = Ctype.sizeof v.ctype in
+      match List.find_map (fun ((lo,hi), loc) -> Option.(
+        let open Elf.Address in
+        let* hi = hi in
+        let* over = lo <= pc in
+        let* under = pc < hi in
+        if over && under then
+          Some loc
+        else
+          None
+      )) v.locs with
+      | None -> ()
+      | Some loc -> Printf.printf "%s = %t\n" v.name Pp.(top (pp_eval_loc sz st) loc);
+    )
+    vars
+  in
+  pv (Hashtbl.to_seq_values dwarf.vars);
+  Hashtbl.iter (fun _ (fn:Dw.Func.t) ->
+    let rec pscope (scope:Dw.Func.scope) =
+      pv (List.to_seq scope.vars);
+      List.iter pscope scope.scopes
+    in
+    pscope fn.func.scope
+  ) dwarf.funcs
+
 
 let run_prog elfname name objdump_d branchtables =
   match Analyse.Utils.read_file_lines "src/analyse/html-preamble-insts.html" with
@@ -56,20 +101,22 @@ let run_prog elfname name objdump_d branchtables =
       in *)
       State.Tree.iter
         (fun a st ->
-          match a with
+          let last_pc = st.last_pc in
+          (match a with
           | Block_lib.Start -> ()
           | Block_lib.BranchAt pc -> 
-              let last_pc = st.last_pc in
               if Elf.Address.(last_pc + 4 <> pc) then
-                Printf.printf "\nJUMP from %t:\n " Pp.(top Elf.Address.pp last_pc);
+                Printf.printf "\nJUMP from %t:\n\n" Pp.(top Elf.Address.pp last_pc);
+              printvars ~st ~dwarf pc;
               print_string (print_analyse_instruction pc);
               print_endline "BRANCH!";
           | Block_lib.NormalAt pc ->
-              let last_pc = st.last_pc in
               if Elf.Address.(last_pc + 4 <> pc) then
-                Printf.printf "\nJUMP from %t:\n " Pp.(top Elf.Address.pp last_pc);
+                Printf.printf "\nJUMP from %t:\n\n" Pp.(top Elf.Address.pp last_pc);
+              printvars ~st ~dwarf pc;
               print_string (print_analyse_instruction pc);
-          | Block_lib.End _ -> ())
+          | Block_lib.End _ -> ());
+        )
         tree;
   match Analyse.Utils.read_file_lines "src/analyse/html-postamble.html" with
   | Error _ -> ()

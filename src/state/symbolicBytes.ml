@@ -148,7 +148,7 @@ module Make (Var : Exp.Var) : S with type var = Var.t = struct
                        |<off_len>|
              *)
           let next = pos + off_len in
-          let* rest = sub_list ~pos:next ~len:(len - next) sb in
+          let* rest = sub_list ~pos:next ~len:(len - off_len) sb in
           let nexp = Typed.extract ~last:((8 * elen) - 1) ~first:(8 * off) e in
           Some (nexp :: rest)
         else

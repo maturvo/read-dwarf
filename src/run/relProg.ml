@@ -5,7 +5,42 @@ open Logs.Logger (struct
   let str = __MODULE__
 end)
 
-let pp_eval_loc sz st (loc: Dw.Loc.t) : PPrint.document =
+let rec pp_array pp sz dims value =
+  match dims with
+  | [] -> pp value
+  | None::_ -> pp value
+  | Some d :: dims ->
+      let sz = sz / d in
+      Seq.iota d
+      |> Seq.map (fun x -> Exp.Typed.extract ~first:(8*x*sz) ~last:(8*(x+1)*sz-1) value)
+      |> List.of_seq
+      |> Pp.list (pp_array pp sz dims) 
+
+let pp_typed ~(tenv: Ctype.env) ~(ctype: Ctype.t) ~pp (value: State.Exp.t) =
+  match ctype.unqualified with
+  | Machine _ -> pp value
+  | Cint _ -> pp value
+  | Cbool -> pp value
+  | Ptr _ -> pp value
+  | Struct { id; _ } ->
+      let s = IdMap.geti tenv.structs id in
+      Pp.(
+        Ctype.FieldMap.to_seq s.layout
+        |> Seq.map (fun (offset, (field:Ctype.field)) -> (
+          opt string field.fname,
+          pp (Exp.Typed.extract ~first:(8*offset) ~last:(8*(offset + field.size)-1) value)
+        ))
+        |> List.of_seq
+        |> mapping s.name
+      )
+  | Array { dims; _ } ->
+      let sz = Ctype.sizeof ctype in
+      pp_array pp sz dims value
+  | Enum _ -> pp value
+  | FuncPtr -> pp value
+  | Missing -> pp value
+
+let pp_eval_loc sz st ~(tenv: Ctype.env) ~(ctype: Ctype.t) (loc: Dw.Loc.t) : PPrint.document =
   let value = match loc with
   | Register reg -> Some (State.get_reg_exp st reg)
   | RegisterOffset (reg, off) ->
@@ -19,11 +54,12 @@ let pp_eval_loc sz st (loc: Dw.Loc.t) : PPrint.document =
       Some (State.read_noprov st ~addr ~size:(Ast.Size.of_bytes sz))
   | Const x -> Some(x |> BitVec.of_z ~size:(8*sz) |> Exp.Typed.bits)
   | Dwarf _ops -> None in
-  Pp.optional (fun value ->
+  let pp = fun value ->
     match Exp.ConcreteEval.eval_if_concrete value with
     | Some(value) -> Exp.Value.pp value
     | None -> State.Exp.pp value
-  ) value
+  in
+  Pp.optional (pp_typed ~tenv ~ctype ~pp) value
 
 let printvars ~st ~(dwarf: Dw.t) pc =
   let st = State.copy_if_locked st in
@@ -41,7 +77,7 @@ let printvars ~st ~(dwarf: Dw.t) pc =
           None
       )) v.locs with
       | None -> ()
-      | Some loc -> Printf.printf "%s = %t\n" v.name Pp.(top (pp_eval_loc sz st) loc);
+      | Some loc -> Printf.printf "%s = %t\n" v.name Pp.(top (pp_eval_loc sz st ~ctype:v.ctype ~tenv:dwarf.tenv) loc);
     )
     vars
   in

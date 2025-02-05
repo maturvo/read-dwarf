@@ -19,7 +19,11 @@ let pp_eval_loc sz st (loc: Dw.Loc.t) : PPrint.document =
       Some (State.read_noprov st ~addr ~size:(Ast.Size.of_bytes sz))
   | Const x -> Some(x |> BitVec.of_z ~size:(8*sz) |> Exp.Typed.bits)
   | Dwarf _ops -> None in
-  Pp.optional State.Exp.pp value
+  Pp.optional (fun value ->
+    match Exp.ConcreteEval.eval_if_concrete value with
+    | Some(value) -> Exp.Value.pp value
+    | None -> State.Exp.pp value
+  ) value
 
 let printvars ~st ~(dwarf: Dw.t) pc =
   let st = State.copy_if_locked st in

@@ -40,18 +40,28 @@ let pp_typed ~(tenv: Ctype.env) ~(ctype: Ctype.t) ~pp (value: State.Exp.t) =
   | FuncPtr -> pp value
   | Missing -> pp value
 
+let read_big st addr sz =
+  Seq.iota_step_up ~step:16 ~endi:sz
+  |> Seq.map (fun off ->
+    let addr = Exp.Typed.(addr + bits_int ~size:Arch.address_size off) in
+    let len = min 16 (sz - off) in
+    State.read_noprov st ~addr ~size:(Ast.Size.of_bytes len)
+  )
+  |> List.of_seq
+  |> Exp.Typed.concat
+
 let pp_eval_loc sz st ~(tenv: Ctype.env) ~(ctype: Ctype.t) (loc: Dw.Loc.t) : PPrint.document =
   let value = match loc with
   | Register reg -> Some (State.get_reg_exp st reg)
   | RegisterOffset (reg, off) ->
       let r = State.get_reg_exp st reg in
-      Some (State.read_noprov st ~addr:Exp.Typed.(r + bits_int ~size:Arch.address_size off) ~size:(Ast.Size.of_bytes sz))
+      Some (read_big st Exp.Typed.(r + bits_int ~size:Arch.address_size off) sz)
   | StackFrame _off -> 
       None
   | Global symoff -> 
       let addr = Elf.SymTable.to_addr_offset symoff in
       let addr = State.Exp.of_address ~size:Arch.address_size addr in
-      Some (State.read_noprov st ~addr ~size:(Ast.Size.of_bytes sz))
+      Some (read_big st addr sz)
   | Const x -> Some(x |> BitVec.of_z ~size:(8*sz) |> Exp.Typed.bits)
   | Dwarf _ops -> None in
   let pp = fun value ->
@@ -62,6 +72,8 @@ let pp_eval_loc sz st ~(tenv: Ctype.env) ~(ctype: Ctype.t) (loc: Dw.Loc.t) : PPr
   Pp.optional (pp_typed ~tenv ~ctype ~pp) value
 
 let printvars ~st ~(dwarf: Dw.t) pc =
+  let out = ref "" in
+
   let st = State.copy_if_locked st in
   let pv vars =
     Seq.iter (fun (v: Dw.Var.t) -> 
@@ -77,7 +89,7 @@ let printvars ~st ~(dwarf: Dw.t) pc =
           None
       )) v.locs with
       | None -> ()
-      | Some loc -> Printf.printf "%s = %t\n" v.name Pp.(top (pp_eval_loc sz st ~ctype:v.ctype ~tenv:dwarf.tenv) loc);
+      | Some loc -> out := !out ^ Printf.sprintf "%s = %t\n" v.name Pp.(tos (pp_eval_loc sz st ~ctype:v.ctype ~tenv:dwarf.tenv) loc);
     )
     vars
   in
@@ -88,7 +100,8 @@ let printvars ~st ~(dwarf: Dw.t) pc =
       List.iter pscope scope.scopes
     in
     pscope fn.func.scope
-  ) dwarf.funcs
+  ) dwarf.funcs;
+  !out
 
 
 let run_prog elfname name objdump_d branchtables =
@@ -147,13 +160,13 @@ let run_prog elfname name objdump_d branchtables =
           | Block_lib.BranchAt pc -> 
               if Elf.Address.(last_pc + 4 <> pc) then
                 Printf.printf "\nJUMP from %t:\n\n" Pp.(top Elf.Address.pp last_pc);
-              printvars ~st ~dwarf pc;
+              print_string @@ Analyse.Pp.css Analyse.Types.Html Render_vars @@ printvars ~st ~dwarf pc;
               print_string (print_analyse_instruction pc);
               print_endline "BRANCH!";
           | Block_lib.NormalAt pc ->
               if Elf.Address.(last_pc + 4 <> pc) then
                 Printf.printf "\nJUMP from %t:\n\n" Pp.(top Elf.Address.pp last_pc);
-              printvars ~st ~dwarf pc;
+              print_string @@ Analyse.Pp.css Analyse.Types.Html Render_vars @@ printvars ~st ~dwarf pc;
               print_string (print_analyse_instruction pc);
           | Block_lib.End _ -> ());
         )

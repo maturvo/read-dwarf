@@ -7,6 +7,7 @@ val get_state_tree :
   ?breakpoints:string list ->
   ?loop:int ->
   ?tree_to_file:string ->
+  ?init:(State.t -> State.t) ->
   unit ->
   Block_lib.label State.Tree.t
 

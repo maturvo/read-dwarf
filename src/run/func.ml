@@ -52,7 +52,7 @@ open Logs.Logger (struct
   let str = __MODULE__
 end)
 
-let no_run_prep ~elf:elfname ~name ~entry =
+let no_run_prep ~elf:elfname ~name ~entry ?(init = State.init_sections_symbolic) () =
   base "Running %s in %s" name elfname;
   let dwarf = Dw.of_file elfname in
   let elf = dwarf.elf in
@@ -66,13 +66,13 @@ let no_run_prep ~elf:elfname ~name ~entry =
   let abi = Arch.get_abi api in
   Trace.Cache.start @@ Arch.get_isla_config ();
   base "Computing entry state";
-  let start = Init.state () |> State.copy ~elf |> State.init_sections ~addr_size:Arch.address_size |> abi.init in
+  let start = Init.state () |> State.copy ~elf |> init |> abi.init in
   if entry then base "Entry state:\n%t" (Pp.topi State.pp start);
   (dwarf, elf, func, start)
 
 let get_state_tree ~elf:elfname ~name ?(dump = false) ?(entry = false) ?len ?(breakpoints = [])
-    ?loop ?tree_to_file () =
-  let (dwarf, elf, func, start) = no_run_prep ~elf:elfname ~name ~entry in
+    ?loop ?tree_to_file ?init () =
+  let (dwarf, elf, func, start) = no_run_prep ~elf:elfname ~name ~entry ?init () in
   match func.sym with
   | None -> fail "Function %s exists in DWARF data but does not have any code" name
   | Some sym ->
@@ -104,7 +104,7 @@ let get_state_tree ~elf:elfname ~name ?(dump = false) ?(entry = false) ?len ?(br
       tree
 
 let cmd_func elfname name dump no_run entry len breakpoints loop tree_to_file =
-  if no_run then ignore @@ no_run_prep ~elf:elfname ~name ~entry
+  if no_run then ignore @@ no_run_prep ~elf:elfname ~name ~entry ()
   else
     ignore
     @@ get_state_tree ~elf:elfname ~name ~dump ~entry ?len ~breakpoints ?loop ?tree_to_file ()

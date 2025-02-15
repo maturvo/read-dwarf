@@ -546,6 +546,17 @@ let init_sections ~addr_size state =
   ) in
   state
 
+let init_sections_symbolic state =
+  let state = copy_if_locked state in
+  let _ = Option.(
+    let+ elf = state.elf in
+    Elf.SymTable.iter elf.symbols @@ fun sym ->
+      if sym.typ = Elf.Symbol.OBJECT then
+        Hashtbl.replace state.mem.sections sym.addr.section Main
+  ) in
+  state
+
+
 let map_mut_exp (f : exp -> exp) s : unit =
   assert (not @@ is_locked s);
   Reg.Map.map_mut_current (Tval.map_exp f) s.regs;

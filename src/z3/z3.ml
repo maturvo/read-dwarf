@@ -527,12 +527,8 @@ module Make (Var : Var) : S with type var = Var.t = struct
   let rec simplify_subterms serv (e : Exp.t) : Exp.t =
     e |> Ast.Manip.all_subterms
     |> List.find_opt (fun t ->
-      let et = Typed.get_type e in
-      let tt = Typed.get_type t in
-      Printf.printf "Types: %t, %t\n" Pp.(top Ast.pp_ty (Ast.Manip.ty_allow_mem et)) Pp.(top Ast.pp_ty (Ast.Manip.ty_allow_mem tt));
       Typed.get_type e = Typed.get_type t &&
       let result = check serv Typed.(e = t) in
-      Printf.printf "%t\n" Pp.(top (optional bool) result);
       result = Some true
     )
     |> Option.map (simplify_subterms serv)

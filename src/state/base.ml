@@ -645,6 +645,7 @@ let eval_address (s : t) (addr: Exp.t) : Elf.Address.t option =
   
 
 let read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
+  debug "Addr: %t" Pp.(top Exp.pp addr);
   let elf_addr = eval_address s addr in
   debug "Address: %t" Pp.(top (optional Elf.Address.pp) elf_addr);
   match elf_addr with

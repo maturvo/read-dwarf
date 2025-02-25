@@ -60,6 +60,7 @@ type t = {
   mem_reads : State.tval HashVector.t;  (** Stores the result of memory reads *)
   state : State.t;
   segments : State.exp SMap.t;
+  asserts: State.exp list;
   dwarf : Dw.t option;  (** Optionally DWARF information. If present, typing is enabled *)
 }
 
@@ -68,19 +69,20 @@ let make_context ?dwarf ?relocation state =
   let reg_writes = Vec.empty () in
   let mem_reads = HashVector.empty () in
 
-  let segments = relocation
+  let segments, asserts = relocation
     |> Option.map (fun relocation ->
       let State.Relocation.{value;asserts;target} = State.Relocation.of_elf relocation in
       List.iter (State.push_relocation_assert state) asserts;
 
-      target
+      (target
       |> Isla.Relocation.segments_of_reloc
       |> SMap.of_list
-      |> SMap.map (fun (first, last) -> Exp.Typed.extract ~first ~last value)
+      |> SMap.map (fun (first, last) -> Exp.Typed.extract ~first ~last value),
+      asserts)
       )
-    |> Option.value ~default:SMap.empty
+    |> Option.value ~default:(SMap.empty, [])
   in
-  { state; reg_writes; mem_reads; dwarf; segments }
+  { state; reg_writes; mem_reads; dwarf; segments; asserts }
 
 (** Expand a Trace variable to a State expression, using the context *)
 let expand_var ~(ctxt : t) (v : Base.Var.t) (a : Ast.no Ast.ty) : State.exp =
@@ -93,3 +95,10 @@ let expand_var ~(ctxt : t) (v : Base.Var.t) (a : Ast.no Ast.ty) : State.exp =
 
 (** Tell if typing should enabled with this context *)
 let typing_enabled ~(ctxt : t) = ctxt.dwarf <> None
+
+module Z3St = State.Simplify.Z3St
+
+let simplify ~(ctxt : t) (exp : State.exp) : State.exp =
+  exp
+  |> Z3St.simplify_subterms_full ~hyps:ctxt.asserts
+  |> Z3St.simplify_full

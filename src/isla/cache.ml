@@ -115,7 +115,7 @@ module Opcode (*: Cache.Key *) = struct
         if small_enough bs rel_id then begin
           assert (not @@ IntBits.get i IntBits.back);
           let res = IntBits.blit l 0 i (IntBits.back - 3) 3 in
-          let res = IntBits.blit rel_id 0 res (IntBits.back - 6) 3 in
+          let res = IntBits.blit rel_id 0 res (IntBits.back - 14) 11 in
           res
         end
         else IntBits.set i IntBits.back
@@ -133,8 +133,8 @@ module Opcode (*: Cache.Key *) = struct
     else if IntBits.get hash IntBits.back then
       Raise.todo()
     else
-      let data = IntBits.sub hash 0 (IntBits.back - 6) in
-      let reloc_id = IntBits.sub hash (IntBits.back - 6) 3 in
+      let data = IntBits.sub hash 0 (IntBits.back - 14) in
+      let reloc_id = IntBits.sub hash (IntBits.back - 14) 11 in
       let size = IntBits.sub hash (IntBits.back - 3) 3 in
       let b = Bytes.create size in
       Bits.unsafe_blit_of_int data 0 b 0 (size * 8);

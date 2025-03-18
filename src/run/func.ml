@@ -71,7 +71,7 @@ let no_run_prep ~elf:elfname ~name ~entry ?(init = State.init_sections_symbolic)
   (dwarf, elf, func, start)
 
 let get_state_tree ~elf:elfname ~name ?(dump = false) ?(entry = false) ?len ?(breakpoints = [])
-    ?loop ?tree_to_file ?init () =
+    ?loop ?tree_to_file ?init ?every_instruction () =
   let (dwarf, elf, func, start) = no_run_prep ~elf:elfname ~name ~entry ?init () in
   match func.sym with
   | None -> fail "Function %s exists in DWARF data but does not have any code" name
@@ -96,7 +96,7 @@ let get_state_tree ~elf:elfname ~name ?(dump = false) ?(entry = false) ?len ?(br
         base "Instructions:\n%t\n" (Pp.topi Runner.pp_instr runner)
       end;
       base "Start running";
-      let tree = Block_lib.run block start in
+      let tree = Block_lib.run block start ?every_instruction in
       tree_to_file
       |> Option.iter (fun x ->
              Files.write_string x @@ Pp.tos (State.Tree.pp_all Block_lib.pp_label) tree ());

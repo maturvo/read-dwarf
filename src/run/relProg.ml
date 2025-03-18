@@ -112,18 +112,6 @@ let run_prog elfname name objdump_d branchtables =
   base "Running with rd %s in %s" name elfname;
   base "Loading %s" elfname;
   let dwarf = Dw.of_file elfname in
-  let elf = dwarf.elf in
-  let func =
-    Dw.get_func_opt ~name dwarf
-    |> Option.value_fun ~default:(fun () -> fail "Function %s wasn't found in %s" name elfname)
-  in
-  let api = Dw.Func.get_api func in
-  base "API %t" (Pp.top Arch.pp_api api);
-  base "Loading ABI";
-  let abi = Arch.get_abi api in
-  Trace.Cache.start @@ Arch.get_isla_config ();
-  base "Computing entry state";
-  let start = Init.state () |> State.copy ~elf |> State.init_sections ~addr_size:Arch.address_size |> abi.init in
   base "Loading %s for Analyse" elfname;
   let analyse_test = Analyse.Elf.parse_elf_file elfname in
   base "Analysing %s for Analyse" elfname;
@@ -135,42 +123,35 @@ let run_prog elfname name objdump_d branchtables =
     Analyse.Pp.pp_instruction Analyse.Types.Html (*Ascii*) analyse_test analyse_analysis 0 index
       instr
   in
-  (* base "Entry state:\n%t" Pp.(topi State.pp start); *)
-  match func.sym with
-  | None -> fail "Function %s exists in DWARF data but do not have any code" name
-  | Some sym ->
-      let endpred = Block_lib.gen_endpred () in
-      let runner = Runner.of_dwarf dwarf in
-      let block = Block_lib.make ~runner ~start:sym.addr ~endpred in
-      base "Start running";
-      let tree = Block_lib.run ~every_instruction:true block start in
-      base "Ended running, start pretty printing";
-      (* This table will contain the state diff to print at each pc with a message *)
-      (* let instr_data : (Elf.Address.t, string * State.t * State.Reg.t list) Hashtbl.t =
-        Hashtbl.create 100
-      in
-      let get_footprint pc =
-        Runner.get_normal_opt runner pc |> Option.fold ~none:[] ~some:Trace.Instr.footprint
-      in *)
-      State.Tree.iter
-        (fun a st ->
-          let last_pc = st.last_pc in
-          (match a with
-          | Block_lib.Start -> ()
-          | Block_lib.BranchAt pc -> 
-              if Elf.Address.(last_pc + 4 <> pc) then
-                Printf.printf "\nJUMP from %t:\n\n" Pp.(top Elf.Address.pp last_pc);
-              print_string @@ Analyse.Pp.css Analyse.Types.Html Render_vars @@ printvars ~st ~dwarf pc;
-              print_string (print_analyse_instruction pc);
-              print_endline "BRANCH!";
-          | Block_lib.NormalAt pc ->
-              if Elf.Address.(last_pc + 4 <> pc) then
-                Printf.printf "\nJUMP from %t:\n\n" Pp.(top Elf.Address.pp last_pc);
-              print_string @@ Analyse.Pp.css Analyse.Types.Html Render_vars @@ printvars ~st ~dwarf pc;
-              print_string (print_analyse_instruction pc);
-          | Block_lib.End _ -> ());
-        )
-        tree;
+  base "Start running";
+  let tree = Func.get_state_tree ~elf:elfname ~name ~init:(State.init_sections ~addr_size:Arch.address_size) ~every_instruction:true () in
+  base "Ended running, start pretty printing";
+  (* This table will contain the state diff to print at each pc with a message *)
+  (* let instr_data : (Elf.Address.t, string * State.t * State.Reg.t list) Hashtbl.t =
+    Hashtbl.create 100
+  in
+  let get_footprint pc =
+    Runner.get_normal_opt runner pc |> Option.fold ~none:[] ~some:Trace.Instr.footprint
+  in *)
+  State.Tree.iter
+    (fun a st ->
+      let last_pc = st.last_pc in
+      (match a with
+      | Block_lib.Start -> ()
+      | Block_lib.BranchAt pc -> 
+          if Elf.Address.(last_pc + 4 <> pc) then
+            Printf.printf "\nJUMP from %t:\n\n" Pp.(top Elf.Address.pp last_pc);
+          print_string @@ Analyse.Pp.css Analyse.Types.Html Render_vars @@ printvars ~st ~dwarf pc;
+          print_string (print_analyse_instruction pc);
+          print_endline "BRANCH!";
+      | Block_lib.NormalAt pc ->
+          if Elf.Address.(last_pc + 4 <> pc) then
+            Printf.printf "\nJUMP from %t:\n\n" Pp.(top Elf.Address.pp last_pc);
+          print_string @@ Analyse.Pp.css Analyse.Types.Html Render_vars @@ printvars ~st ~dwarf pc;
+          print_string (print_analyse_instruction pc);
+      | Block_lib.End _ -> ());
+    )
+    tree;
   match Analyse.Utils.read_file_lines "src/analyse/html-postamble.html" with
   | Error _ -> ()
   | Ok lines -> Array.iter (function s -> Printf.printf "%s\n" s) lines

@@ -28,7 +28,7 @@ let get_elf64_file_global_symbol_init (f: Elf_file.elf64_file) : global_symbol_i
       | None ->
         if machine = Elf_header.elf_ma_aarch64 then
           Error.bind
-            (Elf_symbolic.extract_elf64_relocations_for_section f Abi_aarch64_symbolic_relocation.abi_aarch64_relocation_to_abstract section)
+            (Elf_symbolic.extract_elf64_relocations_for_section f Abi_aarch64_symbolic_relocation.aarch64_relocation_interpreter section)
             @@ fun relocs -> Error.return (AArch64 relocs)
         else
           Error.fail @@ "machine not supported " ^ (Elf_header.string_of_elf_machine_architecture machine)
@@ -43,7 +43,7 @@ let get_elf64_file_global_symbol_init (f: Elf_file.elf64_file) : global_symbol_i
         let bnd  = Elf_symbol_table.extract_symbol_binding entry.elf64_st_info in
         Option.map (
           fun section ->
-            let addr = Dwarf.Offset (section.elf64_section_name_as_string, addr_offset) in
+            let addr = Sym_ocaml.Num.Offset (section.elf64_section_name_as_string, addr_offset) in
             let data = if Byte_sequence.length0 section.elf64_section_body = Z.zero then
               Error.return (Byte_sequence.zeros size)
             else

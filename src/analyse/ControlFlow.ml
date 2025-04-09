@@ -139,7 +139,8 @@ let branch_table_target_addresses test filename_branch_table_option : (addr * ad
 
   (* chop into 4-byte words - as needed for branch offset tables,
      though not for all other things in .rodata *)
-  let rodata_words : (natural * natural) list = Dwarf.words_of_rel_byte_sequence rodata_addr (Dwarf.rbs_no_reloc bs) [] in (*HACK*)
+  let rodata_words : (natural * natural) list =
+    Dwarf.words_of_sym_byte_sequence rodata_addr (Dwarf_byte_sequence.sym_bs_construct bs (Pmap.empty Nat_big_num.compare)) [] in (*HACK*)
 
   let read_rodata_b addr =
     Dwarf.sym_natural_of_byte
@@ -495,7 +496,7 @@ let parse_objdump_lines arch lines : objdump_instruction list =
  *)
 
 let with_symbolic_address (section: string) (addr, opcode_bytes, mnemonic, operands) : objdump_instruction =
-  (Dwarf.Offset (section, Nat_big_num.of_int64 addr), opcode_bytes, mnemonic, operands)
+  (Sym_ocaml.Num.Offset (section, Nat_big_num.of_int64 addr), opcode_bytes, mnemonic, operands)
 
 let rec parse_objdump_lines arch lines (next_index : int) (last_address : int64 option) (section: string option) :
     objdump_instruction list =

@@ -57,7 +57,7 @@ type addr = natural
 (* hackishly mask out bigint conversion failure *)
 let pp_addr (a : natural) = 
   try
-    Dwarf.pp_sym Ml_bindings.hex_string_of_big_int_pad8 a
+    Sym_ocaml.Num.ppf Ml_bindings.hex_string_of_big_int_pad8 a
   with
   | Failure s -> let s' = "Failure: int64_of_big_int " ^ Sym.to_string a in (warn "pp_addr failure: %s" s); s'
   | e -> raise e

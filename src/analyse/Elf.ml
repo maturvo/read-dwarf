@@ -58,8 +58,8 @@ let pp_symbol_map (symbol_map : Elf_file.global_symbol_init_info) =
   String.concat ""
     (List.map
        (fun (name, (typ, _size, address, _mb, _binding)) ->
-         Printf.sprintf "**** name = %s  address = %s  typ = %d\n" name (pp_addr (Dwarf.Absolute address))
-           (Sym.to_int (Dwarf.Absolute typ)))
+         Printf.sprintf "**** name = %s  address = %s  typ = %d\n" name (pp_addr (Sym_ocaml.Num.Absolute address))
+           (Sym.to_int (Sym_ocaml.Num.Absolute typ)))
        symbol_map)
 
 (*****************************************************************************)
@@ -153,8 +153,8 @@ let parse_elf_file (filename : string) : test =
         elf_file;
         arch;
         symbol_map (*@ (symbols_for_stacks !Globals.elf_threads)*);
-        e_entry = Dwarf.Absolute (entry);
-        e_machine = Dwarf.Absolute (machine);
+        e_entry = Sym_ocaml.Num.Absolute (entry);
+        e_machine = Sym_ocaml.Num.Absolute (machine);
         dwarf_static = ds;
         dwarf_semi_pp_frame_info;
       }

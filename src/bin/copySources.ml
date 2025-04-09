@@ -84,8 +84,8 @@ let process_file () : unit =
                else
                  Some
                    (Byte_sequence.string_of_byte_sequence
-                      (rbs_unwrap (List.nth lnh.lnh_include_directories (dir - 1))))),
-              Byte_sequence.string_of_byte_sequence (rbs_unwrap lnfe.lnfe_path) ))
+                      (Dwarf_byte_sequence.sym_bs_expect_const (List.nth lnh.lnh_include_directories (dir - 1))))),
+              Byte_sequence.string_of_byte_sequence (Dwarf_byte_sequence.sym_bs_expect_const lnfe.lnfe_path) ))
       lnh.lnh_file_entries
   in
 

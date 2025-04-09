@@ -61,7 +61,7 @@ let rec loc_merge = function
   | [] -> []
 
 let end_addr_of_sym = function
-| Dwarf.Absolute z when Z.compare z (Z.of_int Int.max_int) > 0 -> None
+| Sym_ocaml.Num.Absolute z when Z.compare z (Z.of_int Int.max_int) > 0 -> None
 | x -> Some (Addr.of_sym x)
 
 (** Create a DWARF variable from its linksem counterpart *)

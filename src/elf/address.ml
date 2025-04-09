@@ -23,4 +23,4 @@ let (<=) = compare (<=)
 
 let (>=) = compare (>=)
 
-let to_sym {section; offset} = Dwarf.Offset (section, Z.of_int offset)
+let to_sym {section; offset} = Sym_ocaml.Num.Offset (section, Z.of_int offset)

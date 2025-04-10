@@ -46,7 +46,7 @@
 
 open Cmdliner
 open Config.CommonOpt
-open Fun
+(* open Fun *)
 
 open Logs.Logger (struct
   let str = __MODULE__
@@ -78,7 +78,12 @@ let get_state_tree ~elf:elfname ~name ?(dump = false) ?(entry = false) ?len ?(br
   | Some sym ->
       let brks =
         List.map
-          (Elf.SymTable.of_position_string elf.symbols %> Elf.SymTable.to_addr_offset)
+          (fun x ->
+            if String.starts_with ~prefix:"UND" x then (*HACK for undefined symbol*)
+              Elf.Address.{ section=x; offset=0 }
+            else
+              x |> Elf.SymTable.of_position_string elf.symbols |> Elf.SymTable.to_addr_offset
+          )
           breakpoints
       in
       let (min, max) =

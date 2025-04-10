@@ -124,7 +124,9 @@ let run_prog elfname name objdump_d branchtables =
       instr
   in
   base "Start running";
-  let tree = Func.get_state_tree ~elf:elfname ~name ~init:(State.init_sections ~addr_size:Arch.address_size) ~every_instruction:true () in
+  let tree = Func.get_state_tree ~elf:elfname ~name ~init:(State.init_sections ~addr_size:Arch.address_size) ~every_instruction:true ()
+    ~breakpoints:["UND.abort"; "UND.exit"]
+  in
   base "Ended running, start pretty printing";
   (* This table will contain the state diff to print at each pc with a message *)
   (* let instr_data : (Elf.Address.t, string * State.t * State.Reg.t list) Hashtbl.t =

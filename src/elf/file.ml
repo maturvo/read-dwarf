@@ -75,6 +75,8 @@ let machine_to_string = function
 (** Pretty prints a {!machine} *)
 let pp_machine mach = mach |> machine_to_string |> Pp.string
 
+module SMap = Map.Make(String)
+
 (** The type containing all the information about an ELF file *)
 type t = {
   filename : string;  (** The name on the file system. Useful for error messages *)
@@ -84,7 +86,7 @@ type t = {
       (** The target architecture of the file; only used in [arch.ml, dumpSym.ml, dw.ml] *)
   linksem : Elf_file.elf_file;
       (** The original linksem structure for the file; only used in  [dw.ml] *)
-  rodata : Segment.t;  (** The read-only data section *)
+  rodata : Segment.t SMap.t;  (** The read-only data sections *)
 }
 
 (** Error on Elf parsing *)
@@ -137,21 +139,31 @@ let of_file (filename : string) =
        within it, and so not suitable to be stored in the [RngMap] *)
   let elf_file = Elf_file.ELF_File_64 elf64_file in
   let rodata =
-    let (_, addr, data) =
-      Dwarf.extract_section_body_without_relocations elf_file ".rodata" false
-      (* `false' argument is for returning an empty byte-sequence if
-         section is not found, instead of throwing an exception *)
-    in
-    Printf.printf "%t" Pp.(top Sym.pp addr);
-    Segment.
-      {
-        data;
-        addr = 0; (* Meaningless for relocatable files *)
-        size = BytesSeq.length data;
-        read = true;
-        write = false;
-        execute = false;
-      }
+    SMap.of_list @@ List.filter_map Option.(fun (section:Elf_interpreted_section.elf64_interpreted_section) ->
+      let+ sname = if String.starts_with ~prefix:".rodata" section.elf64_section_name_as_string then
+        Some section.elf64_section_name_as_string
+      else
+        None
+      in
+      let (_, addr, data) =
+        Dwarf.extract_section_body_without_relocations elf_file sname false
+        (* `false' argument is for returning an empty byte-sequence if
+          section is not found, instead of throwing an exception *)
+      in
+      Printf.printf "%t" Pp.(top Sym.pp addr);
+      (
+        sname,
+        Segment.
+        {
+          data;
+          addr = 0; (* Meaningless for relocatable files *)
+          size = BytesSeq.length data;
+          read = true;
+          write = false;
+          execute = false;
+        }
+      )
+    ) elf64_file.elf64_file_interpreted_sections
   in
   info "ELF file %s has been loaded" filename;
   { filename; symbols; entry; machine; linksem = elf_file; rodata }

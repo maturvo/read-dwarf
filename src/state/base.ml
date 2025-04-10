@@ -624,8 +624,9 @@ let read_from_rodata (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t option
         )
       with Not_found ->
         let int_addr = sym_addr.offset in
-        let rodata = elf.rodata in
-        if sym_addr.section = ".rodata" && rodata.addr <= int_addr && int_addr + size < rodata.addr + rodata.size * 8 then
+        let open Option in
+        let* rodata = Elf.File.SMap.find_opt sym_addr.section elf.rodata in
+        if rodata.addr <= int_addr && int_addr + size < rodata.addr + rodata.size * 8 then
           let bv = BytesSeq.getbvle ~size rodata.data (int_addr - rodata.addr) in
           (* Assume little endian here *)
           Some (Typed.bits bv)

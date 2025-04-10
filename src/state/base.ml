@@ -531,11 +531,11 @@ let init_sections ~addr_size state =
   let _ = Option.(
     let+ elf = state.elf in
     Elf.SymTable.iter elf.symbols @@ fun sym ->
+      let len = List.find (fun x -> sym.size mod x = 0) [16;8;4;2;1] in
       if sym.typ = Elf.Symbol.OBJECT then
         let provenance = Mem.create_section_frag ~addr_size state.mem sym.addr.section in
-        Seq.iota_step_up ~step:16 ~endi:sym.size
+        Seq.iota_step_up ~step:len ~endi:sym.size
         |> Seq.iter (fun off ->
-          let len = min 16 (sym.size - off) in
           let data = Elf.Symbol.sub sym off len in
           let addr = Exp.of_address ~size:addr_size Elf.Address.(sym.addr + off) in
           let size = Ast.Size.of_bytes len in

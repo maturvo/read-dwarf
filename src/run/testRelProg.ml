@@ -9,6 +9,7 @@ let test return_register exit_register name =
   let tree = Func.get_state_tree ~elf:name ~name:"main" ~init:(State.init_sections ~addr_size:Arch.address_size) ~every_instruction:false ()
     ~breakpoints:["UND.abort"; "UND.exit"]
   in
+  debug "%t" (Pp.top (State.Tree.pp_all Block_lib.pp_label) tree);
   let pc = Arch.pc () in
   let ret = State.Reg.of_string return_register in
   let ext = State.Reg.of_string exit_register in

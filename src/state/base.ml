@@ -583,43 +583,6 @@ let set_read (s : t) (read_num : int) (exp : Exp.t) =
   assert (Typed.get_type exp = Typed.get_type (Vec.get s.read_vars read_num |> Tval.exp));
   Vec.update s.read_vars read_num @@ Tval.map_exp (Fun.const exp)
 
-let read_from_rodata (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t option =
-  match s.elf with
-  | None -> None
-  | Some elf -> (
-      if not @@ ConcreteEval.is_concrete addr then None
-      else
-        let sym_addr = Exp.expect_sym_address addr in
-        let size = size |> Ast.Size.to_bits in
-        try
-          let (sym, offset) = Elf.SymTable.of_addr_with_offset elf.symbols sym_addr in
-          if sym.writable then None
-          else
-            (* Assume little endian here *)
-            let bv = BytesSeq.getbvle ~size sym.data.data offset in (* TODO relocations *)
-            Some (Typed.bits bv)
-        with Not_found ->
-          let int_addr = sym_addr.offset in
-          let rodata = elf.rodata in
-          if sym_addr.section = ".rodata" && rodata.addr <= int_addr && int_addr + size < rodata.addr + rodata.size then
-            let bv = BytesSeq.getbvle ~size rodata.data (int_addr - rodata.addr) in
-            (* Assume little endian here *)
-            Some (Typed.bits bv)
-          else (
-            warn "Failed to find symbol or rodata at %t" (Pp.top Elf.Address.pp sym_addr);
-            None
-          )
-    )
-
-let read ~provenance ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
-  assert (not @@ is_locked s);
-  let var = make_read ?ctyp s size in
-  let exp = Mem.read s.mem ~provenance ~var ~addr ~size in
-  let exp = if provenance = Main && exp = None then read_from_rodata ~addr ~size s else exp in
-  Option.iter (set_read s (Var.expect_readvar var)) exp;
-  Option.value exp ~default:(Exp.of_var var)
-
-
 let eval_address (s : t) (addr: Exp.t) : Elf.Address.t option =
   let ctxt0 = function Var.Section _ -> Value.bv @@ BitVec.of_int ~size:64 0 | _ -> raise ConcreteEval.Symbolic in
   let open Option in
@@ -643,6 +606,42 @@ let eval_address (s : t) (addr: Exp.t) : Elf.Address.t option =
       None
   )
   
+let read_from_rodata (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t option =
+  debug "reading from rodata at address: %t" (Pp.top Exp.pp addr);
+  match s.elf with
+  | None -> None
+  | Some elf -> (
+      Option.bind (eval_address s addr) @@ fun sym_addr ->
+      let size = size |> Ast.Size.to_bits in
+      try
+        let (sym, offset) = Elf.SymTable.of_addr_with_offset elf.symbols sym_addr in
+        if sym.writable then None
+        else (
+          (* Assume little endian here *)
+          assert (Relocation.IMap.is_empty sym.data.relocations);
+          let bv = BytesSeq.getbvle ~size sym.data.data offset in (* TODO relocations *)
+          Some (Typed.bits bv)
+        )
+      with Not_found ->
+        let int_addr = sym_addr.offset in
+        let rodata = elf.rodata in
+        if sym_addr.section = ".rodata" && rodata.addr <= int_addr && int_addr + size < rodata.addr + rodata.size * 8 then
+          let bv = BytesSeq.getbvle ~size rodata.data (int_addr - rodata.addr) in
+          (* Assume little endian here *)
+          Some (Typed.bits bv)
+        else (
+          warn "Failed to find symbol or rodata at %t" (Pp.top Elf.Address.pp sym_addr);
+          None
+        )
+    )
+
+let read ~provenance ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
+  assert (not @@ is_locked s);
+  let var = make_read ?ctyp s size in
+  let exp = Mem.read s.mem ~provenance ~var ~addr ~size in
+  let exp = if provenance = Main && exp = None then read_from_rodata ~addr ~size s else exp in
+  Option.iter (set_read s (Var.expect_readvar var)) exp;
+  Option.value exp ~default:(Exp.of_var var)
 
 let read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
   debug "Addr: %t" Pp.(top Exp.pp addr);

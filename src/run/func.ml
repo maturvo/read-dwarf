@@ -52,7 +52,7 @@ open Logs.Logger (struct
   let str = __MODULE__
 end)
 
-let no_run_prep ~elf:elfname ~name ~entry ?(init = State.init_sections_symbolic) () =
+let no_run_prep ~elf:elfname ~name ~entry ?(init = State.init_sections_symbolic ~addr_size:Arch.address_size) () =
   base "Running %s in %s" name elfname;
   let dwarf = Dw.of_file elfname in
   let elf = dwarf.elf in

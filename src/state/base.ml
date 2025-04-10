@@ -531,6 +531,10 @@ let init_sections ~addr_size state =
   let _ = Option.(
     let+ elf = state.elf in
     Elf.SymTable.iter elf.symbols @@ fun sym ->
+      let max_section_addr = Int.shift_left 1 addr_size - sym.size - sym.addr.offset in
+      push_assert state Typed.(
+        comp Ast.Bvule (Exp.of_var (Var.Section sym.addr.section)) (bits_int ~size:64 max_section_addr)
+      );
       let len = List.find (fun x -> sym.size mod x = 0) [16;8;4;2;1] in
       if sym.typ = Elf.Symbol.OBJECT then
         let provenance = Mem.create_section_frag ~addr_size state.mem sym.addr.section in
@@ -546,11 +550,15 @@ let init_sections ~addr_size state =
   ) in
   state
 
-let init_sections_symbolic state =
+let init_sections_symbolic ~addr_size state =
   let state = copy_if_locked state in
   let _ = Option.(
     let+ elf = state.elf in
     Elf.SymTable.iter elf.symbols @@ fun sym ->
+      let max_section_addr = Int.shift_left 1 addr_size - sym.size - sym.addr.offset in
+      push_assert state Typed.(
+        comp Ast.Bvule (Exp.of_var (Var.Section sym.addr.section)) (bits_int ~size:64 max_section_addr)
+      );
       if sym.typ = Elf.Symbol.OBJECT then
         Hashtbl.replace state.mem.sections sym.addr.section Main
   ) in

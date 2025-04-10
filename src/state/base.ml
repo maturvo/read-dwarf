@@ -589,8 +589,7 @@ let read_from_rodata (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t option
   | Some elf -> (
       if not @@ ConcreteEval.is_concrete addr then None
       else
-        let int_addr = ConcreteEval.eval addr |> Value.expect_bv |> BitVec.to_int in
-        let sym_addr = Elf.Address.{ section = ".rodata"; offset = int_addr } in (* TODO this is wrong *)
+        let sym_addr = Exp.expect_sym_address addr in
         let size = size |> Ast.Size.to_bits in
         try
           let (sym, offset) = Elf.SymTable.of_addr_with_offset elf.symbols sym_addr in
@@ -600,13 +599,14 @@ let read_from_rodata (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t option
             let bv = BytesSeq.getbvle ~size sym.data.data offset in (* TODO relocations *)
             Some (Typed.bits bv)
         with Not_found ->
+          let int_addr = sym_addr.offset in
           let rodata = elf.rodata in
-          if rodata.addr <= int_addr && int_addr + size < rodata.addr + rodata.size then
+          if sym_addr.section = ".rodata" && rodata.addr <= int_addr && int_addr + size < rodata.addr + rodata.size then
             let bv = BytesSeq.getbvle ~size rodata.data (int_addr - rodata.addr) in
             (* Assume little endian here *)
             Some (Typed.bits bv)
           else (
-            warn "Failed to find symbol or rodata at 0x%x" int_addr;
+            warn "Failed to find symbol or rodata at %t" (Pp.top Elf.Address.pp sym_addr);
             None
           )
     )

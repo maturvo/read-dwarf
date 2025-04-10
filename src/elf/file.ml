@@ -146,7 +146,7 @@ let of_file (filename : string) =
     Segment.
       {
         data;
-        addr = Sym.to_int addr; (* TODO *)
+        addr = 0; (* Meaningless for relocatable files *)
         size = BytesSeq.length data;
         read = true;
         write = false;

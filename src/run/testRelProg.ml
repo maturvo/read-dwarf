@@ -14,6 +14,14 @@ let test return_register exit_register name =
   let ret = State.Reg.of_string return_register in
   let ext = State.Reg.of_string exit_register in
   State.Tree.iter (fun l st ->
+    let found_symread = ref false in
+    st.read_vars |> Vec.iter Fun.(State.Tval.exp %> Ast.Manip.exp_iter_var (fun v ->
+      match v with
+      | State.Var.ReadVar _ -> found_symread := true; warn "State contains symbolic read variable:\n %t" (Pp.top State.Var.pp v)
+      | _ -> ()
+    ));
+    if !found_symread then
+      warn "State:\n%t" (Pp.top State.pp st);
     if State.is_possible st then
       match l with
       | Block_lib.End _ -> (

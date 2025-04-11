@@ -120,6 +120,7 @@ type unqualified =
   | Enum of { name : string; id : int }  (** See {!env} for what the id refers to *)
   | FuncPtr  (** Hack to accommodate PKVM *)
   | Missing  (** Hack to accommodate PKVM *)
+  | Bits (** Hack to prevent losing type information when processing bitvectors with non-whole-byte sizes *)
 
 (** The internal representation of generalized C types *)
 and t = {
@@ -337,6 +338,7 @@ let rec sizeof_unqualified = function
   | Array { elem; dims } ->
       let num = dims |> List.map (Option.value ~default:0) |> List.fold_left ( * ) 1 in
       num * sizeof elem
+  | Bits -> 0 (* Shouldn't use this value *)
 
 (** Give the size of an type. Need the environement. *)
 and sizeof t = sizeof_unqualified t.unqualified
@@ -660,6 +662,7 @@ and pp_unqualified = function
   | Enum { name; _ } -> dprintf "Enum %s" name
   | FuncPtr -> dprintf "FuncPtr"
   | Missing -> dprintf "Missing"
+  | Bits -> dprintf "Bits"
 
 and pp_fragment frag =
   group

@@ -39,6 +39,7 @@ let pp_typed ~(tenv: Ctype.env) ~(ctype: Ctype.t) ~pp (value: State.Exp.t) =
   | Enum _ -> pp value
   | FuncPtr -> pp value
   | Missing -> pp value
+  | Bits -> pp value
 
 let read_big st addr sz =
   Seq.iota_step_up ~step:16 ~endi:sz

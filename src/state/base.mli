@@ -145,6 +145,9 @@ module Var : sig
 
   (** Get the type of a variable *)
   val ty : t -> Reg.ty
+
+  (** Get a fresh NonDet variable *)
+  val new_nondet : Ast.Size.t -> t
 end
 
 (** The type of variables *)

@@ -58,6 +58,7 @@ module SMap = Map.Make (String)
 type t = {
   reg_writes : (State.Reg.t * State.tval) Vec.t;  (** Stores the delayed register writes *)
   mem_reads : State.tval HashVector.t;  (** Stores the result of memory reads *)
+  nondets : State.var HashVector.t;  (** Stores the mapping of nondet variables *)
   state : State.t;
   segments : State.exp SMap.t;
   asserts: State.exp list;
@@ -68,6 +69,7 @@ type t = {
 let make_context ?dwarf ?relocation state =
   let reg_writes = Vec.empty () in
   let mem_reads = HashVector.empty () in
+  let nondets = HashVector.empty () in
 
   let segments, asserts = relocation
     |> Option.map (fun relocation ->
@@ -82,14 +84,19 @@ let make_context ?dwarf ?relocation state =
       )
     |> Option.value ~default:(SMap.empty, [])
   in
-  { state; reg_writes; mem_reads; dwarf; segments; asserts }
+  { state; reg_writes; mem_reads; nondets; dwarf; segments; asserts }
 
 (** Expand a Trace variable to a State expression, using the context *)
 let expand_var ~(ctxt : t) (v : Base.Var.t) (a : Ast.no Ast.ty) : State.exp =
   assert (Base.Var.ty v = a);
   match v with
   | Register reg -> State.get_reg_exp ctxt.state reg
-  | NonDet (i, _) | Read (i, _) -> (HashVector.get ctxt.mem_reads i).exp (* TODO is the NonDet case correct *)
+  | NonDet (i, sz) -> HashVector.get_opt ctxt.nondets i
+    |> Option.value_fun ~default:(fun () -> 
+      Fun.tee (HashVector.add ctxt.nondets i) (State.Var.new_nondet sz)
+    )
+    |> State.Exp.of_var
+  | Read (i, _) -> (HashVector.get ctxt.mem_reads i).exp (* TODO is the NonDet case correct *)
   | Segment (name, _) -> SMap.find name ctxt.segments (*TODO put the actual value there*)
   (* | Segment (name, sz) -> Exp.Typed.extract ~first:0 ~last:(sz-1) (State.Exp.of_var (State.Var.Section name)) TODO put the actual value there *)
 

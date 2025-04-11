@@ -62,6 +62,8 @@ end
 type id = Id.t
 
 module Var = struct
+  let next_nondet = ref 0
+
   type t =
     | Register of Id.t * Reg.t  (** The value of this register in this state *)
     | ReadVar of Id.t * int * Ast.Size.t
@@ -159,6 +161,11 @@ module Var = struct
     | RetAddr -> Ast.Ty_BitVec 64
     | NonDet (_, size) -> Ast.Ty_BitVec (Ast.Size.to_bits size)
     | Section _ -> Ast.Ty_BitVec 64
+
+  let new_nondet sz =
+    let v = NonDet (!next_nondet, sz) in
+    next_nondet := !next_nondet + 1;
+    v
 end
 
 type var = Var.t

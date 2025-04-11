@@ -106,11 +106,13 @@ let unop (u : Ast.unop) tval : Ctype.t option =
   | Bvneg | Bvnot -> machine_of_size typ |> some
   | Extract (b, a) ->
       debug "Extracting from type %t" Pp.(top (opt Ctype.pp) tval.ctyp);
-      if (* HACK for adrp: a = 0 && b = Arch.address_size - 1 &&*) Ctype.is_ptr typ then tval.ctyp
+      if (* HACK for adrp: a = 0 && b = Arch.address_size - 1 &&*) Ctype.is_ptr typ then
+        tval.ctyp
       else
         let bitsize = b - a + 1 in
         let constexpr = typ.constexpr in
-        if bitsize mod 8 = 0 then Ctype.machine ~constexpr (bitsize / 8) |> some else None
+        if bitsize mod 8 = 0 || bitsize = Arch.address_size && constexpr then
+          Ctype.machine ~constexpr (bitsize / 8) |> some else None
   | ZeroExtend m | SignExtend m ->
       if m mod 8 = 0 then machine_of_size ~update:(m / 8) typ |> some else None
 

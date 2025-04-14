@@ -41,12 +41,15 @@ let pp_typed ~(tenv: Ctype.env) ~(ctype: Ctype.t) ~pp (value: State.Exp.t) =
   | Missing -> pp value
   | Bits -> pp value
 
-let read_big st addr sz =
+let read_big ~prov st addr sz =
+  let addr = Exp.Typed.extract ~last:(Arch.address_size-1) ~first:0 addr in
   Seq.iota_step_up ~step:16 ~endi:sz
   |> Seq.map (fun off ->
     let addr = Exp.Typed.(addr + bits_int ~size:Arch.address_size off) in
     let len = min 16 (sz - off) in
-    State.read_noprov st ~addr ~size:(Ast.Size.of_bytes len)
+    match prov with
+    | None -> State.read_noprov st ~addr ~size:(Ast.Size.of_bytes len)
+    | Some p -> State.read ~provenance:p st ~addr:addr ~size:(Ast.Size.of_bytes len)
   )
   |> List.of_seq
   |> Exp.Typed.concat
@@ -55,14 +58,20 @@ let pp_eval_loc sz st ~(tenv: Ctype.env) ~(ctype: Ctype.t) (loc: Dw.Loc.t) : PPr
   let value = match loc with
   | Register reg -> Some (State.get_reg_exp st reg)
   | RegisterOffset (reg, off) ->
-      let r = State.get_reg_exp st reg in
-      Some (read_big st Exp.Typed.(r + bits_int ~size:Arch.address_size off) sz)
+      let r = State.get_reg st reg in
+      let open Ctype in
+      let prov = Option.bind r.ctyp (fun ctype ->
+        match ctype.unqualified with
+        | Ptr { provenance; _ } -> Some provenance
+        | _ -> None
+      ) in
+      Some (read_big ~prov st Exp.Typed.(r.exp + bits_int ~size:64 off) sz)
   | StackFrame _off -> 
       None
   | Global symoff -> 
       let addr = Elf.SymTable.to_addr_offset symoff in
       let addr = State.Exp.of_address ~size:Arch.address_size addr in
-      Some (read_big st addr sz)
+      Some (read_big ~prov:None st addr sz)
   | Const x -> Some(x |> BitVec.of_z ~size:(8*sz) |> Exp.Typed.bits)
   | Dwarf _ops -> None in
   let pp = fun value ->

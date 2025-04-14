@@ -533,15 +533,34 @@ let set_impossible state =
   assert (not @@ is_locked state);
   state.asserts <- [Typed.false_]
 
+let push_section_constraints ~addr_size state sections =
+  List.iter (fun (s:Elf.File.section) ->
+    let max_section_addr = Int.shift_left 1 addr_size - s.size in
+    let s_exp = (Exp.of_var (Var.Section s.name)) in
+    (* The whole section fits in memory *)
+    push_assert state Typed.(comp Ast.Bvule s_exp (bits_int ~size:64 max_section_addr));
+    (* The load address cannot be 0 *)
+    push_assert state Typed.(not (s_exp = (bits_int ~size:64 0)));
+    if s.align > 1 then
+      let (align_pow, _) = Seq.ints 0
+      |> Seq.drop_while (fun x -> Int.shift_left 1 x < s.align)
+      |> Seq.uncons
+      |> Option.get
+      in
+      if s.align = Int.shift_left 1 align_pow then
+        let last = align_pow - 1 in
+        (* Section address is aligned *)
+        push_assert state Typed.(extract ~first:0 ~last s_exp = zero ~size:align_pow)
+      else
+        warn "Section alignment is not a power of two: %d" s.align;
+  ) sections
+
 let init_sections ~addr_size state =
   let state = copy_if_locked state in
   let _ = Option.(
     let+ elf = state.elf in
+    push_section_constraints ~addr_size state elf.sections;
     Elf.SymTable.iter elf.symbols @@ fun sym ->
-      let max_section_addr = Int.shift_left 1 addr_size - sym.size - sym.addr.offset in
-      push_assert state Typed.(
-        comp Ast.Bvule (Exp.of_var (Var.Section sym.addr.section)) (bits_int ~size:64 max_section_addr)
-      );
       let len = List.find (fun x -> sym.size mod x = 0) [16;8;4;2;1] in
       if sym.typ = Elf.Symbol.OBJECT then
         let provenance = Mem.create_section_frag ~addr_size state.mem sym.addr.section in
@@ -561,11 +580,8 @@ let init_sections_symbolic ~addr_size state =
   let state = copy_if_locked state in
   let _ = Option.(
     let+ elf = state.elf in
+    push_section_constraints ~addr_size state elf.sections;
     Elf.SymTable.iter elf.symbols @@ fun sym ->
-      let max_section_addr = Int.shift_left 1 addr_size - sym.size - sym.addr.offset in
-      push_assert state Typed.(
-        comp Ast.Bvule (Exp.of_var (Var.Section sym.addr.section)) (bits_int ~size:64 max_section_addr)
-      );
       if sym.typ = Elf.Symbol.OBJECT then
         Hashtbl.replace state.mem.sections sym.addr.section Main
   ) in

@@ -77,6 +77,12 @@ let pp_machine mach = mach |> machine_to_string |> Pp.string
 
 module SMap = Map.Make(String)
 
+type section = {
+  name : string;
+  size : int;
+  align : int;
+}
+
 (** The type containing all the information about an ELF file *)
 type t = {
   filename : string;  (** The name on the file system. Useful for error messages *)
@@ -87,6 +93,7 @@ type t = {
   linksem : Elf_file.elf_file;
       (** The original linksem structure for the file; only used in  [dw.ml] *)
   rodata : Segment.t SMap.t;  (** The read-only data sections *)
+  sections : section list;
 }
 
 (** Error on Elf parsing *)
@@ -138,10 +145,16 @@ let of_file (filename : string) =
      - the range of the section is guaranteed to overlap with any symbols
        within it, and so not suitable to be stored in the [RngMap] *)
   let elf_file = Elf_file.ELF_File_64 elf64_file in
+  let sections = List.map (fun (s:Elf_interpreted_section.elf64_interpreted_section) -> {
+    name=s.elf64_section_name_as_string;
+    size=Z.to_int s.elf64_section_size;
+    align=Z.to_int s.elf64_section_align;
+  }) elf64_file.elf64_file_interpreted_sections
+  in
   let rodata =
-    SMap.of_list @@ List.filter_map Option.(fun (section:Elf_interpreted_section.elf64_interpreted_section) ->
-      let+ sname = if String.starts_with ~prefix:".rodata" section.elf64_section_name_as_string then
-        Some section.elf64_section_name_as_string
+    SMap.of_list @@ List.filter_map Option.(fun section ->
+      let+ sname = if String.starts_with ~prefix:".rodata" section.name then
+        Some section.name
       else
         None
       in
@@ -163,7 +176,7 @@ let of_file (filename : string) =
           execute = false;
         }
       )
-    ) elf64_file.elf64_file_interpreted_sections
+    ) sections
   in
   info "ELF file %s has been loaded" filename;
-  { filename; symbols; entry; machine; linksem = elf_file; rodata }
+  { filename; symbols; entry; machine; linksem = elf_file; rodata; sections }

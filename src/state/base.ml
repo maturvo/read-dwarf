@@ -320,24 +320,26 @@ module Mem = struct
     mutable main : Fragment.t;
     frags : (Exp.t * Fragment.t) Vec.t;
     sections : (string, provenance) Hashtbl.t; (* mapping sections to their fragments *)
+    mutable allow_main : bool; (* HACK to prvent incorrectly assuming Main provenance when using section fragments  *)
   }
 
   (** Get the main fragment of memory *)
-  let get_main { main; frags = _; sections = _ } = main
+  let get_main { main; _ } = main
 
   (** Empty memory, every address is unbound *)
-  let empty () = { main = Fragment.empty; frags = Vec.empty (); sections = Hashtbl.create 10 }
+  let empty () = { main = Fragment.empty; frags = Vec.empty (); sections = Hashtbl.create 10; allow_main = true }
 
   (** Build a new memory from the old one by keeping the old one as a base *)
   let from mem =
     { 
       main = Fragment.from mem.main;
       frags = Vec.map (Pair.map Fun.id Fragment.from) mem.frags;
-      sections = Hashtbl.copy mem.sections; 
+      sections = Hashtbl.copy mem.sections;
+      allow_main = mem.allow_main;
     }
 
   (** Copy the memory so that it can be mutated separately *)
-  let copy mem = { main = mem.main; frags = Vec.copy mem.frags; sections = Hashtbl.copy mem.sections }
+  let copy mem = { main = mem.main; frags = Vec.copy mem.frags; sections = Hashtbl.copy mem.sections; allow_main = mem.allow_main }
 
   (** Add a new fragment with the specified base *)
   let new_frag mem base =
@@ -559,11 +561,13 @@ let init_sections ~addr_size state =
   let state = copy_if_locked state in
   let _ = Option.(
     let+ elf = state.elf in
+    state.mem.allow_main <- false;
     push_section_constraints ~addr_size state elf.sections;
+    List.iter (fun (x:Elf.File.section) -> Mem.create_section_frag ~addr_size state.mem x.name |> ignore) elf.sections;
     Elf.SymTable.iter elf.symbols @@ fun sym ->
       let len = List.find (fun x -> sym.size mod x = 0) [16;8;4;2;1] in
       if sym.typ = Elf.Symbol.OBJECT then
-        let provenance = Mem.create_section_frag ~addr_size state.mem sym.addr.section in
+        let provenance = Mem.get_section_provenance state.mem sym.addr.section in
         Seq.iota_step_up ~step:len ~endi:sym.size
         |> Seq.iter (fun off ->
           let data = Elf.Symbol.sub sym off len in
@@ -667,15 +671,18 @@ let read_from_rodata (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t option
         )
     )
 
-let read ~provenance ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
+let rec read ~provenance ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
   assert (not @@ is_locked s);
-  let var = make_read ?ctyp s size in
-  let exp = Mem.read s.mem ~provenance ~var ~addr ~size in
-  let exp = if provenance = Main && exp = None then read_from_rodata ~addr ~size s else exp in
-  Option.iter (set_read s (Var.expect_readvar var)) exp;
-  Option.value exp ~default:(Exp.of_var var)
+  if provenance = Ctype.Main && not s.mem.allow_main then
+    read_noprov ?ctyp s ~addr ~size
+  else
+    let var = make_read ?ctyp s size in
+    let exp = Mem.read s.mem ~provenance ~var ~addr ~size in
+    let exp = if exp = None then read_from_rodata ~addr ~size s else exp in
+    Option.iter (set_read s (Var.expect_readvar var)) exp;
+    Option.value exp ~default:(Exp.of_var var)
 
-let read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
+and read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
   debug "Addr: %t" Pp.(top Exp.pp addr);
   let elf_addr = eval_address s addr in
   debug "Address: %t" Pp.(top (optional Elf.Address.pp) elf_addr);
@@ -684,16 +691,23 @@ let read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
       let addr_size = addr |> Typed.get_type |> Typed.expect_bv in
       let addr = Exp.of_address ~size:addr_size elf_addr in
       let provenance = Mem.get_section_provenance s.mem elf_addr.section in
+      if provenance = Ctype.Main && not s.mem.allow_main then
+        Raise.fail "Main fragment should not be used here";
       read ~provenance ?ctyp s ~addr ~size
   | None when Vec.length s.mem.frags = 0 ->
+      if not s.mem.allow_main then
+        Raise.fail "Main fragment should not be used here";
       read ~provenance:Ctype.Main ?ctyp s ~addr ~size
   | None -> Raise.fail "Trying to access %t in state %d: No provenance info" Pp.(tos Exp.pp addr) s.id
 
-let write ~provenance (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.t) : unit =
+let rec write ~provenance (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.t) : unit =
   assert (not @@ is_locked s);
-  Mem.write ~provenance s.mem ~addr ~size ~exp:value
+  if provenance = Ctype.Main && not s.mem.allow_main then
+    write_noprov s ~addr ~size value
+  else
+    Mem.write ~provenance s.mem ~addr ~size ~exp:value
 
-let write_noprov (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.t) : unit =
+and write_noprov (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.t) : unit =
   let elf_addr = eval_address s addr in
   debug "Address: %t" Pp.(top (optional Elf.Address.pp) elf_addr);
   match elf_addr with
@@ -701,8 +715,12 @@ let write_noprov (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.t) : 
       let addr_size = addr |> Typed.get_type |> Typed.expect_bv in
       let addr = Exp.of_address ~size:addr_size elf_addr in
       let provenance = Mem.get_section_provenance s.mem elf_addr.section in
+      if provenance = Ctype.Main && not s.mem.allow_main then
+        Raise.fail "Main fragment should not be used here";
       write ~provenance s ~addr ~size value
   | None when Vec.length s.mem.frags = 0 ->
+      if not s.mem.allow_main then
+        Raise.fail "Main fragment should not be used here";
       write ~provenance:Ctype.Main s ~addr ~size value
   | None -> Raise.fail "Trying to access %t in state %d: No provenance info" Pp.(tos Exp.pp addr) s.id
 

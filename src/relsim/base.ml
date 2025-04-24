@@ -42,16 +42,33 @@ end
 
 module Z3sim = Z3.Make (Var)
 
+type sem_type =
+| Value of int
+| Ptr of sem_type
+
 type value_relation =
 | Eq
 | EqSection of string
 | EqPage of string
+| Indirect of sem_type
+
+let rec pp_sem_type = Pp.(function
+| Value w -> !^"Val"^^(int w)
+| Ptr typ -> (pp_sem_type typ)^^(!^"*")
+)
 
 let pp_rel = Pp.(function
 | Eq -> !^"Eq"
 | EqSection s -> !^"EqSection " ^^ !^s
 | EqPage s -> !^"EqPage " ^^ !^s
+| Indirect typ -> !^"Indirect " ^^ (pp_sem_type typ)
 )
+
+let rec sem_type_of_type (typ: Ctype.t) : sem_type =
+  match typ.unqualified with
+  | Ctype.Machine _ | Ctype.Cint _ | Ctype.Cbool | Ctype.Enum _ -> Value (Ctype.sizeof typ)
+  | Ptr { fragment=Ctype.DynArray typ'; _ } -> Ptr (sem_type_of_type typ')
+  | _ -> Raise.todo()
 
 let value_rel_for_type: Ctype.unqualified -> value_relation = function
 | Ctype.Machine _ | Ctype.Cint _ | Ctype.Cbool | Ctype.Enum _ -> Eq
@@ -63,19 +80,22 @@ module ExpRel = struct
   type t = State.exp * value_relation * State.exp
 
   let to_exp ((exp1, rel, exp2):t) =
+    let open Option in
     let modify e =
       match rel with
-      | Eq -> e
-      | EqSection s -> Typed.(e - State.Exp.of_var (State.Var.Section s))
-      | EqPage s -> Typed.(e - concat [extract ~first:12 ~last:63 (State.Exp.of_var (State.Var.Section s)); bits_int ~size:12 0])
+      | Eq -> e |> some
+      | EqSection s -> Typed.(e - State.Exp.of_var (State.Var.Section s)) |> some
+      (* TODO this is probably wrong: *)
+      | EqPage s -> Typed.(e - concat [extract ~first:12 ~last:63 (State.Exp.of_var (State.Var.Section s)); bits_int ~size:12 0]) |> some
+      | Indirect _ -> None
     in
-    let e1, e2 = modify exp1, modify exp2 in
+    let+ e1, e2 = lift_pair (modify exp1, modify exp2) in
     Typed.((Exp.left e1) = (Exp.right e2))
   
   let check ?hyps (rel:t) =
-    to_exp rel
-    |> Z3sim.check_full ?hyps
-    |> Option.value_fun ~default:Raise.todo
+    match to_exp rel with
+    | None -> false
+    | Some e -> e |> Z3sim.check_full ?hyps |> Option.value_fun ~default:Raise.todo
   
   let infer ?hyps (exp1:State.exp) (exp2:State.exp) =
     let sections = ref [] in
@@ -92,7 +112,7 @@ module RegRel = struct
   type t = value_relation State.Reg.Map.t
   
   let infer ~(assume:ExpRel.t list) (s1:State.t) (s2:State.t) =
-    let hyps = List.map ExpRel.to_exp assume in
+    let hyps = List.filter_map ExpRel.to_exp assume in
     State.Reg.Map.mapi (fun reg (tval1:State.tval) ->
       let tval2 = State.get_reg s2 reg in
       ExpRel.infer ~hyps tval1.exp tval2.exp
@@ -163,7 +183,7 @@ module StackRel = struct
       let size = Ast.Size.to_bytes blk1.size in
 
       let stack = RelMap.clear stack ~pos:offset ~len:size in      
-      let hyps = List.map ExpRel.to_exp exps in
+      let hyps = List.filter_map ExpRel.to_exp exps in
       let stack = match ExpRel.infer ~hyps exp1 exp2 with
       | None ->
           warn "Failed to find correspondence (TODO better warn message)";
@@ -187,6 +207,28 @@ module StackRel = struct
       stack := RelMap.add !stack off (value_rel_for_type ctype.unqualified, Ctype.len ctype)
     ) frag;
     !stack
+end
+
+module GlobalRel = struct
+  type eq_pair = State.exp * State.exp * sem_type
+
+  type t = eq_pair list
+
+  let find (rel:t) a1 a2 =
+    let check_one a1 a2 (a1', a2', typ) =
+      Z3sim.check_full Typed.(manyop Ast.And [Exp.left a1= Exp.right a1'; Exp.left a2= Exp.right a2'])
+      |> Option.value_fun ~default:Raise.todo
+    in
+    List.find_map (check_one a1 a2) rel
+
+  let check (rel:t) (pair: eq_pair) =
+    let check_one (a1, a2, typ) (a1', a2', typ') =
+      typ = typ' && (
+        Z3sim.check_full Typed.(manyop Ast.And [Exp.left a1= Exp.right a1'; Exp.left a2= Exp.right a2'])
+        |> Option.value_fun ~default:Raise.todo
+      )
+    in
+    List.exists (check_one pair) rel
 end
 
 
@@ -216,7 +258,7 @@ let rec checksim ~(ctxt:ctxt) (s1:State.t) (s2:State.t) =
 
     let asserts, stack = StackRel.infer ~exps:ctxt.asserts ~prev_stack ~stack_prov s1 s2 in
 
-    let asserts_exp = List.map ExpRel.to_exp asserts in
+    let asserts_exp = List.filter_map ExpRel.to_exp asserts in
     let asst1 = List.map Exp.left s1.asserts in
     let asst2 = List.map Exp.right s2.asserts in
     let impl1 = List.for_all Fun.(Z3sim.check_full ~hyps:(asst1@asserts_exp) %> flip Option.value_fail "TODO: Z3 failed") asst2 in

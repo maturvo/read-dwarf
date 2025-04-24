@@ -48,7 +48,13 @@
 type range = Addr.t * Addr.t option
 
 (** Type of a DWARF variable *)
-type t = { name : string; param : bool; ctype : Ctype.t; locs : (range * Loc.t) list }
+type t = {
+  name : string;
+  param : bool;
+  ctype : Ctype.t;
+  locs : (range * Loc.t) list;
+  locs_frame_base : (range * Loc.t) list;
+}
 
 (** Type of a DWARF variable in linksem *)
 type linksem_t = Dwarf.sdt_variable_or_formal_parameter
@@ -78,7 +84,12 @@ let of_linksem (elf : Elf.File.t) (env : Ctype.env) (lvar : linksem_t) : t =
     |> List.map (fun (a, b, l) -> ((Addr.of_sym a, end_addr_of_sym b), Loc.of_linksem elf l))
     |> loc_merge
   in
-  { name; param; ctype; locs }
+  let locs_frame_base =
+    lvar.svfp_locations_frame_base |> Option.value ~default:[]
+    |> List.map (fun (a, b, l) -> ((Addr.of_sym a, end_addr_of_sym b), Loc.of_linksem elf l))
+    |> loc_merge
+  in
+  { name; param; ctype; locs; locs_frame_base }
 
 (** Pretty print a variable *)
 let pp_raw v =

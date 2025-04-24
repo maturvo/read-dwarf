@@ -54,8 +54,8 @@ let read_big ~prov st addr sz =
   |> List.of_seq
   |> Exp.Typed.concat
 
-let pp_eval_loc sz st ~(tenv: Ctype.env) ~(ctype: Ctype.t) (loc: Dw.Loc.t) : PPrint.document =
-  let value = match loc with
+let eval_loc ?frame_value sz st (loc: Dw.Loc.t) : State.Exp.t option =
+  match loc with
   | Register reg -> Some (State.get_reg_exp st reg)
   | RegisterOffset (reg, off) ->
       let r = State.get_reg st reg in
@@ -66,14 +66,40 @@ let pp_eval_loc sz st ~(tenv: Ctype.env) ~(ctype: Ctype.t) (loc: Dw.Loc.t) : PPr
         | _ -> None
       ) in
       Some (read_big ~prov st Exp.Typed.(r.exp + bits_int ~size:64 off) sz)
-  | StackFrame _off -> 
-      None
+  | StackFrame off -> 
+    (* This is a bit hacky, should instead extract the provenance from frame_value *)
+    let stack_provenance = Option.bind (State.get_reg st (Arch.sp())).ctyp (fun ctype ->
+      match ctype.unqualified with
+      | Ptr { provenance; _ } -> Some provenance
+      | _ -> None
+    ) in
+
+    let open Option in
+    let+ frame_value = frame_value in
+    debug "Reading from %t" Pp.(top State.Exp.pp Exp.Typed.(frame_value + bits_int ~size:64 off));
+    read_big ~prov:stack_provenance st Exp.Typed.(frame_value + bits_int ~size:64 off) sz
   | Global symoff -> 
       let addr = Elf.SymTable.to_addr_offset symoff in
       let addr = State.Exp.of_address ~size:Arch.address_size addr in
       Some (read_big ~prov:None st addr sz)
   | Const x -> Some(x |> BitVec.of_z ~size:(8*sz) |> Exp.Typed.bits)
-  | Dwarf _ops -> None in
+  | Dwarf _ops -> None
+
+let eval_loc_from_list ?frame_value sz st pc locs=
+  let open Option in
+  let+ loc = List.find_map (fun ((lo,hi), loc) -> (
+    let open Elf.Address in
+    let* hi = hi in
+    let* over = lo <= pc in
+    let* under = pc < hi in
+    if over && under then
+      Some loc
+    else
+      None
+  )) locs in
+  eval_loc ?frame_value sz st loc
+
+let pp_variable_value  ~(tenv: Ctype.env) ~(ctype: Ctype.t) value =
   let pp = fun value ->
     match Exp.ConcreteEval.eval_if_concrete value with
     | Some(value) -> Exp.Value.pp value
@@ -88,18 +114,12 @@ let printvars ~st ~(dwarf: Dw.t) pc =
   let pv vars =
     Seq.iter (fun (v: Dw.Var.t) -> 
       let sz = Ctype.sizeof v.ctype in
-      match List.find_map (fun ((lo,hi), loc) -> Option.(
-        let open Elf.Address in
-        let* hi = hi in
-        let* over = lo <= pc in
-        let* under = pc < hi in
-        if over && under then
-          Some loc
-        else
-          None
-      )) v.locs with
+      let frame_value = eval_loc_from_list sz st pc v.locs_frame_base |> Option.join in
+      debug "Frame value %t" Pp.(top (optional State.Exp.pp) frame_value);
+      let value = eval_loc_from_list ?frame_value sz st pc v.locs in
+      match value with
       | None -> ()
-      | Some loc -> out := !out ^ Printf.sprintf "%s = %t\n" v.name Pp.(tos (pp_eval_loc sz st ~ctype:v.ctype ~tenv:dwarf.tenv) loc);
+      | Some var_val -> out := !out ^ Printf.sprintf "%s = %t\n" v.name Pp.(tos (pp_variable_value ~ctype:v.ctype ~tenv:dwarf.tenv) var_val);
     )
     vars
   in

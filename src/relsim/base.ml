@@ -146,7 +146,28 @@ module StackRel = struct
   end)
   type t = RelMap.t
 
+  type loc = { offset:int; size:int }
+
   module Event = State.Mem.Fragment.Event
+
+  let loc_of_blocks (blk1:State.Mem.Fragment.Block.t) (blk2:State.Mem.Fragment.Block.t) =
+    if Option.is_some blk1.base || Option.is_some blk2.base then
+      Raise.todo();
+    if blk1.offset != blk2.offset || blk1.size != blk2.size then
+      Raise.fail "blocks don't match";
+    
+    { offset=blk1.offset; size=Ast.Size.to_bytes blk1.size }
+
+  let rel_at_loc stack loc =
+    let open Option in
+    let* ((rel, relsz), reloff) = RelMap.at_off_opt stack loc.offset in
+    if loc.size != relsz || reloff != 0 then
+      (warn "Size not matching"; None)
+    else
+      Some rel
+  
+  let clear_loc stack loc =
+    RelMap.clear stack ~pos:loc.offset ~len:loc.size  
 
   let rec process_trace ~exps ~stack (tr1:Event.t list) (tr2:Event.t list) =
     match tr1, tr2 with
@@ -216,87 +237,102 @@ module GlobalRel = struct
 
   let find (rel:t) a1 a2 =
     let check_one a1 a2 (a1', a2', typ) =
-      Z3sim.check_full Typed.(manyop Ast.And [Exp.left a1= Exp.right a1'; Exp.left a2= Exp.right a2'])
-      |> Option.value_fun ~default:Raise.todo
+      let equal = Z3sim.check_full Typed.(manyop Ast.And [Exp.left a1= Exp.right a1'; Exp.left a2= Exp.right a2']) in
+      match equal with
+      | Some true -> Some typ
+      | _ -> None
     in
     List.find_map (check_one a1 a2) rel
 
-  let check (rel:t) (pair: eq_pair) =
-    let check_one (a1, a2, typ) (a1', a2', typ') =
-      typ = typ' && (
-        Z3sim.check_full Typed.(manyop Ast.And [Exp.left a1= Exp.right a1'; Exp.left a2= Exp.right a2'])
-        |> Option.value_fun ~default:Raise.todo
-      )
-    in
-    List.exists (check_one pair) rel
+  let check (rel:t) ((a1, a2, typ): eq_pair) =
+    find rel a1 a2 = Some typ
 end
 
+module Context = struct
+  type t = {
+    asserts: Exp.t list;
+    stack: StackRel.t;
+    global: GlobalRel.t;
+  }
 
-(* let get_api elfname name = 
-  base "Running %s in %s" name elfname;
-  let dwarf = Dw.of_file elfname in
-  let func =
-    Dw.get_func_opt ~name dwarf
-    |> Option.value_fun ~default:(fun () -> fail "Function %s wasn't found in %s" name elfname)
-  in
-  Dw.Func.get_api func *)
+  module Event = State.Mem.Fragment.Event
 
-type ctxt = {
-  mem_sim: (State.Id.t*State.Id.t, StackRel.t) Hashtbl.t;
-  mutable asserts: ExpRel.t list;
-}
+  let add_expr_rel (ctxt:t) rel =
+    match rel with
+    | (_v1, Indirect _t, _v2) -> Raise.todo()
+    | rel ->
+        let exp = Option.value_fail (ExpRel.to_exp rel) "Failed to convert relation to expression" in
+        { ctxt with asserts = exp::ctxt.asserts }
+
+  let process_stack_operation event1 event2 (ctxt: t) =
+    match event1, event2 with
+    | Event.Read (blk1, v1), Event.Read (blk2, v2) ->
+        let loc = StackRel.loc_of_blocks blk1 blk2 in
+        let rel = StackRel.rel_at_loc ctxt.stack loc in
+        ( match rel with
+        | Some rel -> add_expr_rel ctxt (State.Exp.of_var v1, rel, State.Exp.of_var v2)
+        | None -> ctxt
+        )
+    | Event.Write (blk1, _exp1), Event.Write (blk2, _exp2) ->
+        let loc = StackRel.loc_of_blocks blk1 blk2 in
+        { ctxt with stack = StackRel.clear_loc ctxt.stack loc}
+    | _ -> Raise.fail "traces don't match"
+
+  let infer_from_types ~stack_frag (state: State.t) =
+    let stack = StackRel.infer_from_types state ~stack_frag in
+
+    let regs = RegRel.infer_from_types state in
+    let exp_rels = RegRel.to_exp_rel state state regs in
+
+    let ctxt = { stack; asserts=[]; global=[] } in
+    List.fold_left add_expr_rel ctxt exp_rels
+end
+
+type simrel = (State.Id.t*State.Id.t, Context.t) Hashtbl.t
 
 let stack_prov = 0(* TODO determine stack_frag automatically *)
 let stack_frag = 0(* TODO determine stack_frag automatically *)
 
-let rec checksim ~(ctxt:ctxt) (s1:State.t) (s2:State.t) =
-  Hashtbl.find_opt ctxt.mem_sim (s1.id, s2.id)
+let rec checksim ~(rel:simrel) (s1:State.t) (s2:State.t) =
+  Hashtbl.find_opt rel (s1.id, s2.id)
   |> Option.value_fun ~default:(fun() ->
     let bs1 = Option.value_fail s1.base_state "no base state" in
     let bs2 = Option.value_fail s2.base_state "no base state" in
-    let prev_stack = checksim ~ctxt bs1 bs2 in
+    let prev_ctxt = checksim ~rel bs1 bs2 in
 
-    let asserts, stack = StackRel.infer ~exps:ctxt.asserts ~prev_stack ~stack_prov s1 s2 in
+    let ((_,mem1), (_,mem2)) = State.Mem.(get_frag s1.mem stack_prov, get_frag s2.mem stack_prov) in
+    let (trc1, trc2) = State.Mem.Fragment.(get_trace mem1, get_trace mem2) in
 
-    let asserts_exp = List.filter_map ExpRel.to_exp asserts in
+    let ctxt = List.fold_right2 Context.process_stack_operation trc1 trc2 prev_ctxt in
+
     let asst1 = List.map Exp.left s1.asserts in
     let asst2 = List.map Exp.right s2.asserts in
-    let impl1 = List.for_all Fun.(Z3sim.check_full ~hyps:(asst1@asserts_exp) %> flip Option.value_fail "TODO: Z3 failed") asst2 in
-    let impl2 = List.for_all Fun.(Z3sim.check_full ~hyps:(asst2@asserts_exp) %> flip Option.value_fail "TODO: Z3 failed") asst1 in
-    if not (impl1 && impl2) then
-      failwith "States not equivalent"; (*TODO more info*)
+    let impl1 = List.find_all Fun.(Z3sim.check_full ~hyps:(asst1@ctxt.asserts) %> flip Option.value_fail "TODO: Z3 failed" %> not) asst2 in
+    let impl2 = List.find_all Fun.(Z3sim.check_full ~hyps:(asst2@ctxt.asserts) %> flip Option.value_fail "TODO: Z3 failed" %> not) asst1 in
+    if not (List.is_empty impl1 && List.is_empty impl2) then
+      fail "States not equivalent on path conditions\n
+      State A: %t\n
+      State B: %t\n" Pp.(top (list Exp.pp) impl1) Pp.(top (list Exp.pp) impl2); (*TODO more info*)
 
-    Hashtbl.add ctxt.mem_sim (s1.id, s2.id) stack;
-    ctxt.asserts <- asserts @ ctxt.asserts;
-    stack
+    Hashtbl.add rel (s1.id, s2.id) ctxt;
+    ctxt
   )
+
 
 let run elf name =
   let tree = Run.Func.get_state_tree ~elf ~name () in
   let initial_state = tree.state in
-
-  let initial_regs = RegRel.infer_from_types initial_state in
   
-  let initial_stack = StackRel.infer_from_types initial_state ~stack_frag in 
-  let ctxt = {
-    mem_sim=Hashtbl.create 10;
-    asserts=RegRel.to_exp_rel initial_state initial_state initial_regs;
-  } in
-  Hashtbl.add ctxt.mem_sim (initial_state.id, initial_state.id) initial_stack;
-  State.Tree.iter (fun _ s ->
-    let stack = checksim ~ctxt s s in
-    Printf.printf "-- STATE %t --\n" (Pp.top State.Id.pp s.id);
-    StackRel.RelMap.iteri (fun i (rel,_sz) ->
-      Printf.printf "SP+%d: %t\n" i (Pp.top pp_rel rel)
-    ) stack;
-    let rel = RegRel.infer ~assume:ctxt.asserts s s in
-    State.Reg.Map.iteri (fun reg rel ->
-      Option.iter (fun rel ->
-        Printf.printf "%t: %t\n" (Pp.top State.Reg.pp reg) (Pp.top pp_rel rel)
-      ) rel
-    ) rel
-  ) tree
+  let initial_ctxt = Context.infer_from_types ~stack_frag initial_state in
 
+  let simrel:simrel = Hashtbl.create 10 in
+  Hashtbl.add simrel (initial_state.id, initial_state.id) initial_ctxt;
+
+  base "%t" (Pp.top (State.Tree.pp_all Run.Block_lib.pp_label) tree);
+
+  State.Tree.iter (fun _ s ->
+    checksim ~rel:simrel s s |> ignore;
+  ) tree
 
 let elf =
   let doc = "ELF file from which to pull the code" in

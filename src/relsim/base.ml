@@ -74,7 +74,14 @@ let value_rel_for_type: Ctype.unqualified -> value_relation = function
 | Ctype.Machine _ | Ctype.Cint _ | Ctype.Cbool | Ctype.Enum _ -> Eq
 | Ptr { fragment=Ctype.Global s; _ } -> EqSection s
 | Ptr { fragment=Ctype.DynFragment i; _ } -> EqSection ("Dyn_"^string_of_int i)
+| Ptr { fragment=Ctype.DynArray typ'; _ } -> Indirect (sem_type_of_type typ')
 | _ -> Raise.todo()
+
+exception SimulationFailure of string
+
+let fail_sim fmt =
+  let fail msg = raise(SimulationFailure msg) in
+  Printf.ksprintf fail fmt
 
 module ExpRel = struct
   type t = State.exp * value_relation * State.exp
@@ -106,18 +113,15 @@ module ExpRel = struct
       [Eq]
     in
     List.find_opt (fun r -> check ?hyps (exp1, r, exp2)) to_check
+  
+  let pp ((a, r, b):t) =
+    let open Pp in
+    pp_rel r ^^ !^" between " ^^ State.Exp.pp a ^^ !^" and " ^^ State.Exp.pp b
 end
 
 module RegRel = struct
   type t = value_relation State.Reg.Map.t
-  
-  let infer ~(assume:ExpRel.t list) (s1:State.t) (s2:State.t) =
-    let hyps = List.filter_map ExpRel.to_exp assume in
-    State.Reg.Map.mapi (fun reg (tval1:State.tval) ->
-      let tval2 = State.get_reg s2 reg in
-      ExpRel.infer ~hyps tval1.exp tval2.exp
-    ) s1.regs
-  
+
   let special_regs = ["OSDLR_EL1"; "OSLSR_EL1"; "EDSCR"; "SCR_EL3"]
 
   let infer_from_types (s:State.t) =
@@ -154,8 +158,9 @@ module StackRel = struct
     if Option.is_some blk1.base || Option.is_some blk2.base then
       Raise.todo();
     if blk1.offset != blk2.offset || blk1.size != blk2.size then
-      Raise.fail "blocks don't match";
-    
+      fail_sim "blocks don't match (%d, %t bytes) (%d, %t bytes)"
+        blk1.offset (Pp.tos Ast.Size.pp_bytes blk1.size)
+        blk2.offset (Pp.tos Ast.Size.pp_bytes blk2.size);
     { offset=blk1.offset; size=Ast.Size.to_bytes blk1.size }
 
   let rel_at_loc stack loc =
@@ -168,58 +173,6 @@ module StackRel = struct
   
   let clear_loc stack loc =
     RelMap.clear stack ~pos:loc.offset ~len:loc.size  
-
-  let rec process_trace ~exps ~stack (tr1:Event.t list) (tr2:Event.t list) =
-    match tr1, tr2 with
-    | [], [] -> (exps, stack)
-    | Event.Read (blk1, v1) :: tr1, Event.Read (blk2, v2) :: tr2 ->
-      let (exps, stack) = process_trace ~exps ~stack tr1 tr2 in
-
-      if Option.is_some blk1.base || Option.is_some blk2.base then
-        Raise.todo();
-      if blk1.offset != blk2.offset || blk1.size != blk2.size then
-        Raise.fail "traces don't match";
-      
-      let offset = blk1.offset in
-      let size = Ast.Size.to_bytes blk1.size in
-      let exps = match RelMap.at_off_opt stack offset with
-      | Some((rel, relsz), reloff) ->
-        if size != relsz || reloff != 0 then
-          Raise.todo();
-        (State.Exp.of_var v1, rel, State.Exp.of_var v2)::exps
-      | None ->
-        warn "No relation for read";
-        exps
-      in
-      (exps, stack)
-    | Event.Write (blk1, exp1) :: tr1, Event.Write (blk2, exp2) :: tr2 ->
-      let (exps, stack) = process_trace ~exps ~stack tr1 tr2 in
-
-      if Option.is_some blk1.base || Option.is_some blk2.base then
-        Raise.todo();
-      if blk1.offset != blk2.offset || blk1.size != blk2.size then
-        Raise.fail "traces don't match";
-      
-      let offset = blk1.offset in
-      let size = Ast.Size.to_bytes blk1.size in
-
-      let stack = RelMap.clear stack ~pos:offset ~len:size in      
-      let hyps = List.filter_map ExpRel.to_exp exps in
-      let stack = match ExpRel.infer ~hyps exp1 exp2 with
-      | None ->
-          warn "Failed to find correspondence (TODO better warn message)";
-          stack
-      | Some rel ->
-          RelMap.add stack offset (rel, size)
-      in
-      (exps, stack)
-    | _ -> Raise.fail "traces don't match"
-
-  let infer ~exps ~prev_stack ~stack_prov (st1:State.t) (st2:State.t) =
-    (* Printf.printf "%t\n%t\n" (Pp.top State.pp st1) (Pp.top State.pp st2); *)
-    let ((_,mem1), (_,mem2)) = State.Mem.(get_frag st1.mem stack_prov, get_frag st2.mem stack_prov) in
-    let (trc1, trc2) = State.Mem.Fragment.(get_trace mem1, get_trace mem2) in
-    process_trace ~exps ~stack:prev_stack trc1 trc2
   
   let infer_from_types ~stack_frag (st1:State.t) =
     let frag = Vec.get st1.fenv.frags stack_frag in
@@ -237,16 +190,44 @@ module GlobalRel = struct
 
   let find (rel:t) a1 a2 =
     let check_one a1 a2 (a1', a2', typ) =
-      let equal = Z3sim.check_full Typed.(manyop Ast.And [Exp.left a1= Exp.right a1'; Exp.left a2= Exp.right a2']) in
+      debug "%t %t %t %t" (Pp.top State.Exp.pp a1) (Pp.top State.Exp.pp a2) (Pp.top State.Exp.pp a1') (Pp.top State.Exp.pp a2');
+      let equal = Z3sim.check_full Typed.(manyop Ast.And [Exp.left a1= Exp.left a1'; Exp.right a2= Exp.right a2']) in
       match equal with
       | Some true -> Some typ
       | _ -> None
     in
     List.find_map (check_one a1 a2) rel
+  
+  let add (rel:t) ((a1, a2, typ): eq_pair) =
+    let last = Arch.address_size - 1 in
+    (Typed.extract ~first:0 ~last a1, Typed.extract ~first:0 ~last a2, typ)::rel
 
   let check (rel:t) ((a1, a2, typ): eq_pair) =
-    find rel a1 a2 = Some typ
+    Option.map ((=) typ) (find rel a1 a2)
+  
+  let rel_of_sem_type = function
+  | Ptr t -> Indirect t
+  | Value _ -> Eq
 end
+
+let block_addr (blk : State.Mem.Fragment.Block.t) =
+  let offset = Typed.bits_int ~size:Arch.address_size blk.offset in
+  match blk.base with
+  | None -> offset
+  | Some b -> Typed.(b + offset)
+
+let ptr_safety_asserts typ v =
+  let sz = match typ with
+  | Value x -> x
+  | Ptr _ -> 8 (*assume 64 bit pointers*)
+  in
+  let topbits = (64 - Arch.address_size) in
+  let small_enough = Typed.(extract ~first:Arch.address_size ~last:63 v = zero ~size:topbits) in
+  
+  let last = sz - 1 in
+  let aligned = Typed.(extract ~first:0 ~last v = zero ~size:sz) in
+  
+  [small_enough; aligned]
 
 module Context = struct
   type t = {
@@ -259,10 +240,26 @@ module Context = struct
 
   let add_expr_rel (ctxt:t) rel =
     match rel with
-    | (_v1, Indirect _t, _v2) -> Raise.todo()
+    | (v1, Indirect t, v2) ->
+        let safety1 = ptr_safety_asserts t v1 |> List.map Exp.left in
+        let safety2 = ptr_safety_asserts t v2 |> List.map Exp.right in
+        let nullptrs = Typed.((Exp.left v1 = zero ~size:64) = (Exp.right v2 = zero ~size:64)) in
+        { 
+          asserts = safety1 @ safety2 @ nullptrs::ctxt.asserts;
+          global = GlobalRel.add ctxt.global (v1, v2, t);
+          stack = ctxt.stack;
+        }
     | rel ->
         let exp = Option.value_fail (ExpRel.to_exp rel) "Failed to convert relation to expression" in
         { ctxt with asserts = exp::ctxt.asserts }
+  
+  let check_expr_rel (ctxt:t) rel =
+    match rel with
+    | (v1, Indirect t, v2) ->
+        GlobalRel.check ctxt.global (v1, v2, t)
+    | rel ->
+        let exp = Option.value_fail (ExpRel.to_exp rel) "Failed to convert relation to expression" in
+        Z3sim.check_full ~hyps:ctxt.asserts exp
 
   let process_stack_operation event1 event2 (ctxt: t) =
     match event1, event2 with
@@ -271,21 +268,62 @@ module Context = struct
         let rel = StackRel.rel_at_loc ctxt.stack loc in
         ( match rel with
         | Some rel -> add_expr_rel ctxt (State.Exp.of_var v1, rel, State.Exp.of_var v2)
-        | None -> ctxt
+        | None -> (debug "No relation for stack read %t %t" (Pp.top Event.pp event1) (Pp.top Event.pp event2); ctxt)
         )
     | Event.Write (blk1, _exp1), Event.Write (blk2, _exp2) ->
         let loc = StackRel.loc_of_blocks blk1 blk2 in
         { ctxt with stack = StackRel.clear_loc ctxt.stack loc}
-    | _ -> Raise.fail "traces don't match"
+    | _ -> fail_sim "traces don't match %t %t" (Pp.tos Event.pp event1) (Pp.tos Event.pp event2)
+  
+  let process_global_operation event1 event2 (ctxt: t) =
+    match event1, event2 with
+    | Event.Read (blk1, v1), Event.Read (blk2, v2) ->
+        let addr1 = block_addr blk1 in
+        let addr2 = block_addr blk2 in
+        let typ = GlobalRel.find ctxt.global addr1 addr2 in
+        ( match typ with
+        | Some typ ->
+            let rel = GlobalRel.rel_of_sem_type typ in
+            add_expr_rel ctxt (State.Exp.of_var v1, rel, State.Exp.of_var v2)
+        | None -> (warn "No relation for global read %t %t" (Pp.top Event.pp event1) (Pp.top Event.pp event2); ctxt)
+        )
+    | Event.Write (blk1, exp1), Event.Write (blk2, exp2) ->
+        let addr1 = block_addr blk1 in
+        let addr2 = block_addr blk2 in
+        let typ = GlobalRel.find ctxt.global addr1 addr2 in
+        ( match typ with
+        | Some typ ->
+            let rel = GlobalRel.rel_of_sem_type typ in
+            if check_expr_rel ctxt (exp1, rel, exp2) <> Some true then
+              fail_sim "Unable to verify %t" (Pp.tos ExpRel.pp (exp1, rel, exp2))
+        | None -> fail_sim "Unable to determine target type for global write %t %t" (Pp.tos Event.pp event1) (Pp.tos Event.pp event2)
+        );
+        ctxt
+    | _ -> fail_sim "traces don't match %t %t" (Pp.tos Event.pp event1) (Pp.tos Event.pp event2)
 
-  let infer_from_types ~stack_frag (state: State.t) =
+  let infer_from_types ~stack_frag ~(dwarf:Dw.t) (state: State.t) =
     let stack = StackRel.infer_from_types state ~stack_frag in
 
     let regs = RegRel.infer_from_types state in
-    let exp_rels = RegRel.to_exp_rel state state regs in
+    let register_rels = RegRel.to_exp_rel state state regs in
+
+    let global_variable_rels =
+      Hashtbl.to_seq_values dwarf.vars
+      |> Seq.map (fun (v:Dw.Var.t) ->
+        let typ = sem_type_of_type v.ctype in
+        match v.locs with
+        | [_, Global addr] ->
+            let addr = Elf.SymTable.to_addr_offset addr in
+            let exp = State.Exp.of_address ~size:64 addr in
+            (exp, Indirect typ, exp)
+        | _ ->
+            Raise.fail "Weird location description for global variable: %t" (Pp.tos Dw.Var.pp_raw v);
+      )
+      |> List.of_seq
+    in
 
     let ctxt = { stack; asserts=[]; global=[] } in
-    List.fold_left add_expr_rel ctxt exp_rels
+    List.fold_left add_expr_rel ctxt (register_rels @ global_variable_rels)
 end
 
 type simrel = (State.Id.t*State.Id.t, Context.t) Hashtbl.t
@@ -293,46 +331,75 @@ type simrel = (State.Id.t*State.Id.t, Context.t) Hashtbl.t
 let stack_prov = 0(* TODO determine stack_frag automatically *)
 let stack_frag = 0(* TODO determine stack_frag automatically *)
 
+exception SimulationFailureWithContext of {
+  msg:string;
+  states: State.t * State.t;
+  ctxt: Context.t;
+}
+
 let rec checksim ~(rel:simrel) (s1:State.t) (s2:State.t) =
   Hashtbl.find_opt rel (s1.id, s2.id)
   |> Option.value_fun ~default:(fun() ->
     let bs1 = Option.value_fail s1.base_state "no base state" in
     let bs2 = Option.value_fail s2.base_state "no base state" in
     let prev_ctxt = checksim ~rel bs1 bs2 in
+    try
 
-    let ((_,mem1), (_,mem2)) = State.Mem.(get_frag s1.mem stack_prov, get_frag s2.mem stack_prov) in
-    let (trc1, trc2) = State.Mem.Fragment.(get_trace mem1, get_trace mem2) in
+      (* Process stack trace *)
+      let ((_,mem1), (_,mem2)) = State.Mem.(get_frag s1.mem stack_prov, get_frag s2.mem stack_prov) in
+      let (trc1, trc2) = State.Mem.Fragment.(get_trace mem1, get_trace mem2) in
 
-    let ctxt = List.fold_right2 Context.process_stack_operation trc1 trc2 prev_ctxt in
+      let ctxt = List.fold_right2 Context.process_stack_operation trc1 trc2 prev_ctxt in
 
-    let asst1 = List.map Exp.left s1.asserts in
-    let asst2 = List.map Exp.right s2.asserts in
-    let impl1 = List.find_all Fun.(Z3sim.check_full ~hyps:(asst1@ctxt.asserts) %> flip Option.value_fail "TODO: Z3 failed" %> not) asst2 in
-    let impl2 = List.find_all Fun.(Z3sim.check_full ~hyps:(asst2@ctxt.asserts) %> flip Option.value_fail "TODO: Z3 failed" %> not) asst1 in
-    if not (List.is_empty impl1 && List.is_empty impl2) then
-      fail "States not equivalent on path conditions\n
-      State A: %t\n
-      State B: %t\n" Pp.(top (list Exp.pp) impl1) Pp.(top (list Exp.pp) impl2); (*TODO more info*)
+      (* Process global trace *)
+      let (mem1, mem2) = State.Mem.(get_main s1.mem, get_main s2.mem) in
+      let (trc1, trc2) = State.Mem.Fragment.(get_trace mem1, get_trace mem2) in
 
-    Hashtbl.add rel (s1.id, s2.id) ctxt;
-    ctxt
+      let ctxt = List.fold_right2 Context.process_global_operation trc1 trc2 ctxt in
+
+
+      let asst1 = List.map Exp.left s1.asserts in
+      let asst2 = List.map Exp.right s2.asserts in
+      let impl1 = List.find_all Fun.(Z3sim.check_full ~hyps:(asst1@ctxt.asserts) %> flip Option.value_fail "TODO: Z3 failed" %> not) asst2 in
+      let impl2 = List.find_all Fun.(Z3sim.check_full ~hyps:(asst2@ctxt.asserts) %> flip Option.value_fail "TODO: Z3 failed" %> not) asst1 in
+      if not (List.is_empty impl1 && List.is_empty impl2) then
+        fail_sim "States not equivalent on path conditions\n
+        State A: %t\n
+        State B: %t\n" Pp.(tos (list Exp.pp) impl1) Pp.(tos (list Exp.pp) impl2); (*TODO more info*)
+
+      Hashtbl.add rel (s1.id, s2.id) ctxt;
+      ctxt
+    with
+    | SimulationFailure s -> raise @@ SimulationFailureWithContext {
+        msg=s;
+        states=(s1,s2);
+        ctxt=prev_ctxt;
+      }
   )
 
 
 let run elf name =
+  let dwarf = Dw.of_file elf in
   let tree = Run.Func.get_state_tree ~elf ~name () in
   let initial_state = tree.state in
   
-  let initial_ctxt = Context.infer_from_types ~stack_frag initial_state in
+  let initial_ctxt = Context.infer_from_types ~stack_frag ~dwarf initial_state in
 
   let simrel:simrel = Hashtbl.create 10 in
   Hashtbl.add simrel (initial_state.id, initial_state.id) initial_ctxt;
 
-  base "%t" (Pp.top (State.Tree.pp_all Run.Block_lib.pp_label) tree);
+  debug "%t" (Pp.top (State.Tree.pp_all Run.Block_lib.pp_label) tree);
 
-  State.Tree.iter (fun _ s ->
-    checksim ~rel:simrel s s |> ignore;
-  ) tree
+  try
+    State.Tree.iter (fun _ s ->
+      checksim ~rel:simrel s s |> ignore;
+    ) tree;
+    base "Simulation successful"
+  with
+  | SimulationFailureWithContext e ->
+      let st, _ = e.states in
+      debug "Failing state: %t" (Pp.top State.pp st);
+      base "Simulation failed: %s" e.msg 
 
 let elf =
   let doc = "ELF file from which to pull the code" in

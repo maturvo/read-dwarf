@@ -188,10 +188,10 @@ module GlobalRel = struct
 
   type t = eq_pair list
 
-  let find (rel:t) a1 a2 =
+  let find ~hyps (rel:t) a1 a2 =
     let check_one a1 a2 (a1', a2', typ) =
       debug "%t %t %t %t" (Pp.top State.Exp.pp a1) (Pp.top State.Exp.pp a2) (Pp.top State.Exp.pp a1') (Pp.top State.Exp.pp a2');
-      let equal = Z3sim.check_full Typed.(manyop Ast.And [Exp.left a1= Exp.left a1'; Exp.right a2= Exp.right a2']) in
+      let equal = Z3sim.check_full ~hyps Typed.(manyop Ast.And [Exp.left a1= Exp.left a1'; Exp.right a2= Exp.right a2']) in
       match equal with
       | Some true -> Some typ
       | _ -> None
@@ -199,11 +199,10 @@ module GlobalRel = struct
     List.find_map (check_one a1 a2) rel
   
   let add (rel:t) ((a1, a2, typ): eq_pair) =
-    let last = Arch.address_size - 1 in
-    (Typed.extract ~first:0 ~last a1, Typed.extract ~first:0 ~last a2, typ)::rel
+    (a1, a2, typ)::rel
 
-  let check (rel:t) ((a1, a2, typ): eq_pair) =
-    Option.map ((=) typ) (find rel a1 a2)
+  let check ~hyps (rel:t) ((a1, a2, typ): eq_pair) =
+    Option.map ((=) typ) (find ~hyps rel a1 a2)
   
   let rel_of_sem_type = function
   | Ptr t -> Indirect t
@@ -211,10 +210,10 @@ module GlobalRel = struct
 end
 
 let block_addr (blk : State.Mem.Fragment.Block.t) =
-  let offset = Typed.bits_int ~size:Arch.address_size blk.offset in
+  let ext = 64-Arch.address_size in
   match blk.base with
-  | None -> offset
-  | Some b -> Typed.(b + offset)
+  | None -> Typed.bits_int ~size:64 blk.offset
+  | Some b -> Typed.(unop (Ast.ZeroExtend ext) b + bits_int ~size:64 blk.offset)
 
 let ptr_safety_asserts typ v =
   let sz = match typ with
@@ -256,7 +255,7 @@ module Context = struct
   let check_expr_rel (ctxt:t) rel =
     match rel with
     | (v1, Indirect t, v2) ->
-        GlobalRel.check ctxt.global (v1, v2, t)
+        GlobalRel.check ~hyps:ctxt.asserts ctxt.global (v1, v2, t)
     | rel ->
         let exp = Option.value_fail (ExpRel.to_exp rel) "Failed to convert relation to expression" in
         Z3sim.check_full ~hyps:ctxt.asserts exp
@@ -280,7 +279,7 @@ module Context = struct
     | Event.Read (blk1, v1), Event.Read (blk2, v2) ->
         let addr1 = block_addr blk1 in
         let addr2 = block_addr blk2 in
-        let typ = GlobalRel.find ctxt.global addr1 addr2 in
+        let typ = GlobalRel.find ~hyps:ctxt.asserts ctxt.global addr1 addr2 in
         ( match typ with
         | Some typ ->
             let rel = GlobalRel.rel_of_sem_type typ in
@@ -290,7 +289,7 @@ module Context = struct
     | Event.Write (blk1, exp1), Event.Write (blk2, exp2) ->
         let addr1 = block_addr blk1 in
         let addr2 = block_addr blk2 in
-        let typ = GlobalRel.find ctxt.global addr1 addr2 in
+        let typ = GlobalRel.find ~hyps:ctxt.asserts ctxt.global addr1 addr2 in
         ( match typ with
         | Some typ ->
             let rel = GlobalRel.rel_of_sem_type typ in

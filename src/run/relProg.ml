@@ -165,25 +165,27 @@ let run_prog elfname name objdump_d branchtables =
   let get_footprint pc =
     Runner.get_normal_opt runner pc |> Option.fold ~none:[] ~some:Trace.Instr.footprint
   in *)
-  State.Tree.iter
-    (fun a st ->
-      let last_pc = st.last_pc in
-      (match a with
-      | Block_lib.Start -> ()
-      | Block_lib.BranchAt pc -> 
-          if Elf.Address.(last_pc + 4 <> pc) then
-            Printf.printf "\nJUMP from %t:\n\n" Pp.(top Elf.Address.pp last_pc);
-          print_string @@ Analyse.Pp.css Analyse.Types.Html Render_vars @@ printvars ~st ~dwarf pc;
-          print_string (print_analyse_instruction pc);
-          print_endline "BRANCH!";
-      | Block_lib.NormalAt pc ->
-          if Elf.Address.(last_pc + 4 <> pc) then
-            Printf.printf "\nJUMP from %t:\n\n" Pp.(top Elf.Address.pp last_pc);
-          print_string @@ Analyse.Pp.css Analyse.Types.Html Render_vars @@ printvars ~st ~dwarf pc;
-          print_string (print_analyse_instruction pc);
-      | Block_lib.End _ -> ());
-    )
-    tree;
+  let rec iter (f:Block_lib.label State.Tree.t) =
+    let st = f.state in
+    let last_pc = st.last_pc in
+    (match f.data with
+    | Block_lib.Start -> ()
+    | Block_lib.BranchAt pc | Block_lib.NormalAt pc -> 
+        if Elf.Address.(last_pc + 4 <> pc) then
+          Printf.printf "\nJUMP from %t:\n\n" Pp.(top Elf.Address.pp last_pc);
+        print_string @@ Analyse.Pp.css Analyse.Types.Html Render_vars @@ printvars ~st ~dwarf pc;
+        print_string (print_analyse_instruction pc);
+    | Block_lib.End _ -> 
+        print_string "END";
+      );
+    let succ = List.filter (fun (s:Block_lib.label State.Tree.t) ->
+      State.is_possible s.state
+    ) f.rest in
+    if List.length succ > 1 then
+      print_string "BRANCH!";
+    List.iter iter succ
+  in
+  iter tree;
   match Analyse.Utils.read_file_lines "src/analyse/html-postamble.html" with
   | Error _ -> ()
   | Ok lines -> Array.iter (function s -> Printf.printf "%s\n" s) lines

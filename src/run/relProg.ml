@@ -16,22 +16,22 @@ let rec pp_array pp sz dims value =
       |> List.of_seq
       |> Pp.list (pp_array pp sz dims) 
 
-let pp_typed ~(tenv: Ctype.env) ~(ctype: Ctype.t) ~pp (value: State.Exp.t) =
+let pp_typed ~(tenv: Ctype.env) ~(ctype: Ctype.t) ~(pp : ?hex:bool -> _ -> _) (value: State.Exp.t) =
   match ctype.unqualified with
   | Machine _ -> pp value
   | Cint _ -> pp value
   | Cbool -> pp value
-  | Ptr _ -> pp value
+  | Ptr _ -> pp ~hex:true value
   | Struct { id; _ } ->
       let s = IdMap.geti tenv.structs id in
       Pp.(
         Ctype.FieldMap.to_seq s.layout
         |> Seq.map (fun (offset, (field:Ctype.field)) -> (
-          opt string field.fname,
+          Option.value ~default:"?" field.fname,
           pp (Exp.Typed.extract ~first:(8*offset) ~last:(8*(offset + field.size)-1) value)
         ))
         |> List.of_seq
-        |> mapping s.name
+        |> record s.name
       )
   | Array { dims; _ } ->
       let sz = Ctype.sizeof ctype in
@@ -100,8 +100,9 @@ let eval_loc_from_list ?frame_value sz st pc locs=
   eval_loc ?frame_value sz st loc
 
 let pp_variable_value  ~(tenv: Ctype.env) ~(ctype: Ctype.t) value =
-  let pp = fun value ->
+  let pp ?(hex=false) = fun value ->
     match Exp.ConcreteEval.eval_if_concrete value with
+    | Some(Exp.Value.Bv bv) when not hex -> Pp.int @@ BitVec.to_int bv
     | Some(value) -> Exp.Value.pp value
     | None -> State.Exp.pp value
   in

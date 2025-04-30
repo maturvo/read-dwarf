@@ -83,6 +83,13 @@ let fail_sim fmt =
   let fail msg = raise(SimulationFailure msg) in
   Printf.ksprintf fail fmt
 
+let pp_diff pre pp l r =
+  let open Pp in
+  surround 2 2
+    pre
+    (!^"L: "^^pp l ^^ space ^^ !^"R: "^^pp r)
+    empty
+
 module ExpRel = struct
   type t = State.exp * value_relation * State.exp
 
@@ -98,25 +105,12 @@ module ExpRel = struct
     in
     let+ e1, e2 = lift_pair (modify exp1, modify exp2) in
     Typed.((Exp.left e1) = (Exp.right e2))
-  
-  let check ?hyps (rel:t) =
-    match to_exp rel with
-    | None -> false
-    | Some e -> e |> Z3sim.check_full ?hyps |> Option.value_fun ~default:Raise.todo
-  
-  let infer ?hyps (exp1:State.exp) (exp2:State.exp) =
-    let sections = ref [] in
-    Ast.Manip.exp_iter_var (function State.Var.Section s -> sections := s::!sections | _ -> ()) exp1;
-    let to_check = if Typed.get_type exp1 = Ast.Ty_BitVec 64 then
-      Eq :: List.map (fun s -> EqSection s) !sections @ List.map (fun s -> EqPage s) !sections
-    else
-      [Eq]
-    in
-    List.find_opt (fun r -> check ?hyps (exp1, r, exp2)) to_check
-  
+ 
   let pp ((a, r, b):t) =
     let open Pp in
-    pp_rel r ^^ !^" between " ^^ State.Exp.pp a ^^ !^" and " ^^ State.Exp.pp b
+    pp_diff
+      (pp_rel r ^^ !^" between")
+      Exp.pp (Exp.left a) (Exp.right b)
 end
 
 module RegRel = struct
@@ -362,9 +356,12 @@ let rec checksim ~(rel:simrel) (s1:State.t) (s2:State.t) =
       let impl1 = List.find_all Fun.(Z3sim.check_full ~hyps:(asst1@ctxt.asserts) %> flip Option.value_fail "TODO: Z3 failed" %> not) asst2 in
       let impl2 = List.find_all Fun.(Z3sim.check_full ~hyps:(asst2@ctxt.asserts) %> flip Option.value_fail "TODO: Z3 failed" %> not) asst1 in
       if not (List.is_empty impl1 && List.is_empty impl2) then
-        fail_sim "States not equivalent on path conditions\n
-        State A: %t\n
-        State B: %t\n" Pp.(tos (list Exp.pp) impl1) Pp.(tos (list Exp.pp) impl2); (*TODO more info*)
+        fail_sim "%t" Pp.(Fun.const @@ sprint @@ pp_diff
+          !^"States not equivalent on path conditions"
+          (list Exp.pp)
+          impl2
+          impl1
+      );
 
       Hashtbl.add rel (s1.id, s2.id) ctxt;
       ctxt
@@ -375,6 +372,21 @@ let rec checksim ~(rel:simrel) (s1:State.t) (s2:State.t) =
         ctxt=prev_ctxt;
       }
   )
+
+let check_return_values ~(ret_reg) ~(ret_type:Ctype.t) ~(rel:simrel) (s1:State.t) (s2:State.t) =
+  let ctxt = Hashtbl.find rel (s1.id, s2.id) in
+
+  let ret_val1 = State.get_reg_exp s1 ret_reg in
+  let ret_val2 = State.get_reg_exp s2 ret_reg in
+  let rel = value_rel_for_type ret_type.unqualified in
+
+  if Context.check_expr_rel ctxt (ret_val1, rel, ret_val2) <> Some true then
+    raise @@ SimulationFailureWithContext {
+      msg=Printf.sprintf "Return values not equivalent
+Condition: %t\n" (Pp.tos ExpRel.pp (ret_val1, rel, ret_val2));
+      states=(s1,s2);
+      ctxt=ctxt;
+    }
 
 
 let run elf name =
@@ -389,16 +401,29 @@ let run elf name =
 
   debug "%t" (Pp.top (State.Tree.pp_all Run.Block_lib.pp_label) tree);
 
+  let ret = Option.(
+    let* func =Dw.get_func_opt ~name dwarf in
+    let+ typ = func.func.ret in
+    if Ctype.sizeof typ > 8 then
+      Raise.fail "unsupported return type %t" (Pp.tos Ctype.pp typ)
+    else
+      ((Arch.dwarf_reg_map()).(0), typ)
+  ) in
+
   try
-    State.Tree.iter (fun _ s ->
+    State.Tree.prefix_iter (fun _ s ->
       checksim ~rel:simrel s s |> ignore;
+      if State.get_reg_exp s (Arch.pc()) = State.Exp.of_var State.Var.RetAddr then
+        Option.iter (fun (ret_reg, ret_type) ->
+          check_return_values ~ret_reg ~ret_type ~rel:simrel s s;
+        ) ret
     ) tree;
     base "Simulation successful"
   with
   | SimulationFailureWithContext e ->
       let st, _ = e.states in
       debug "Failing state: %t" (Pp.top State.pp st);
-      base "Simulation failed: %s" e.msg 
+      base "Simulation failed:\n\n%s" e.msg
 
 let elf =
   let doc = "ELF file from which to pull the code" in

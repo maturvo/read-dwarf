@@ -294,10 +294,12 @@ module Relocation = struct
       else
         []
       in
+      let v, a =
       (
-        Typed.concat (before @ relocation.value :: after),
+        Typed.concat (after @ relocation.value :: before),
         relocation.asserts @ asserts
-      )
+      ) in
+      v,a
     ) data.relocations (exp, [])
 end
 
@@ -647,24 +649,37 @@ let read_from_rodata (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t option
   | None -> None
   | Some elf -> (
       Option.bind (eval_address s addr) @@ fun sym_addr ->
-      let size = size |> Ast.Size.to_bits in
+      let size = size |> Ast.Size.to_bytes in
       try
         let (sym, offset) = Elf.SymTable.of_addr_with_offset elf.symbols sym_addr in
         if sym.writable then None
         else (
-          (* Assume little endian here *)
-          assert (Relocation.IMap.is_empty sym.data.relocations);
-          let bv = BytesSeq.getbvle ~size sym.data.data offset in (* TODO relocations *)
-          Some (Typed.bits bv)
+          let data = Elf.Symbol.sub sym offset size in
+          let value, asserts = Relocation.exp_of_data data in
+          
+          if not @@ List.is_empty asserts then
+            warn "Relocaiton assserts in .rodata ignored: %t" Pp.(top (list Exp.pp) asserts);
+
+          Some value
         )
       with Not_found ->
         let int_addr = sym_addr.offset in
         let open Option in
         let* rodata = Elf.File.SMap.find_opt sym_addr.section elf.rodata in
-        if rodata.addr <= int_addr && int_addr + size <= rodata.addr + rodata.size * 8 then
-          let bv = BytesSeq.getbvle ~size rodata.data (int_addr - rodata.addr) in
-          (* Assume little endian here *)
-          Some (Typed.bits bv)
+        if rodata.addr <= int_addr && int_addr + size <= rodata.addr + rodata.size then
+          let data, relocations = rodata.data in
+          let data = BytesSeq.sub data (int_addr - rodata.addr) size in
+          base "Addr offset: %d, size: %d" int_addr size;
+          base "All relocs: %t" (Pp.top Elf.Relocations.pp relocations);
+          let relocations = Elf.Relocations.sub relocations (int_addr - rodata.addr) size in
+          base "Sub relocs: %t" (Pp.top Elf.Relocations.pp relocations);
+          let value, asserts = Relocation.exp_of_data {data; relocations} in
+          base "Value: %t" (Pp.top Exp.pp value);
+          
+          if not @@ List.is_empty asserts then
+            warn "Relocaiton assserts in .rodata ignored: %t" Pp.(top (list Exp.pp) asserts);
+
+          Some value
         else (
           warn "Failed to find symbol or rodata at %t" (Pp.top Elf.Address.pp sym_addr);
           None

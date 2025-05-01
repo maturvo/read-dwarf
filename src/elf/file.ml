@@ -152,23 +152,28 @@ let of_file (filename : string) =
   }) elf64_file.elf64_file_interpreted_sections
   in
   let rodata =
-    SMap.of_list @@ List.filter_map Option.(fun section ->
-      let+ sname = if String.starts_with ~prefix:".rodata" section.name then
-        Some section.name
+    SMap.of_list @@ List.filter_map Option.(fun (section:Elf_interpreted_section.elf64_interpreted_section) ->
+      let+ sname = if String.starts_with ~prefix:".rodata" section.elf64_section_name_as_string then
+        Some section.elf64_section_name_as_string
       else
         None
       in
-      let (_, addr, data) =
-        Dwarf.extract_section_body_without_relocations elf_file sname false
+      let data = section.elf64_section_body in
+      Printf.printf "%t" Pp.(top BytesSeq.pp data);
+      let relocations = match LinksemRelocatable.get_relocations_for_section elf64_file sname with
+      | Error.Fail s -> elferror "LinksemRelocatable: get_relocations_for_section: %s" s
+      | Error.Success x -> Relocations.of_linksem x
+      in 
+      (* let (_, addr, data) =
+        Dwarf.extract_section_body elf_file Abi_aarch64_symbolic_relocation.aarch64_data_relocation_interpreter sname false
         (* `false' argument is for returning an empty byte-sequence if
           section is not found, instead of throwing an exception *)
-      in
-      Printf.printf "%t" Pp.(top Sym.pp addr);
+      in *)
       (
         sname,
         Segment.
         {
-          data;
+          data = (data, relocations);
           addr = 0; (* Meaningless for relocatable files *)
           size = BytesSeq.length data;
           read = true;
@@ -176,7 +181,7 @@ let of_file (filename : string) =
           execute = false;
         }
       )
-    ) sections
+    ) elf64_file.elf64_file_interpreted_sections
   in
   info "ELF file %s has been loaded" filename;
   { filename; symbols; entry; machine; linksem = elf_file; rodata; sections }

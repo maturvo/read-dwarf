@@ -98,6 +98,7 @@ let event_mut ~(ctxt : ctxt) (event : Base.event) =
         | None ->
             State.read_noprov ctxt.state ~addr:naddr ~size |> State.Tval.of_exp
       in
+      debug "read value: %t" Pp.(top State.Tval.pp tval);
       HashVector.set ctxt.mem_reads value tval
   | WriteMem { addr; value; size } -> (
       let naddr = expand_simplify ~ctxt addr in
@@ -109,6 +110,7 @@ let event_mut ~(ctxt : ctxt) (event : Base.event) =
           let ptrtype = Typer.expr ~ctxt addr in
           debug "Typed write mem with ptr:%t" (Pp.top (Pp.opt Ctype.pp) ptrtype);
           let value = expand_tval ~ctxt value in
+          debug "written value: %t" Pp.(top State.Tval.pp value);
           Typer.write ~dwarf ctxt.state ?ptrtype ~addr:naddr ~size value
       | None ->
           let value = expand_simplify ~ctxt value in

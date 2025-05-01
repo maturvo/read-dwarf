@@ -19,21 +19,23 @@ type global_symbol_init_info = symbol list
 open Elf_symbol_table
 open Elf_interpreted_section
 
+let get_relocations_for_section (f:Elf_file.elf64_file) section =
+  let machine = f.elf64_file_header.elf64_machine in
+  if machine = Elf_header.elf_ma_aarch64 then
+    Error.bind
+      (Elf_symbolic.extract_elf64_relocations_for_section f Abi_aarch64_symbolic_relocation.aarch64_relocation_interpreter section)
+      @@ fun relocs -> Error.return (AArch64 relocs)
+  else
+    Error.fail @@ "machine not supported " ^ (Elf_header.string_of_elf_machine_architecture machine)
+
 let get_elf64_file_global_symbol_init (f: Elf_file.elf64_file) : global_symbol_init_info Error.error =
   let secs = f.elf64_file_interpreted_sections in
-  let machine = f.elf64_file_header.elf64_machine in
   Error.bind (Elf_file.get_elf64_file_symbol_table f) @@ fun (symtab, strtab) ->
     let rel_cache = ref SMap.empty in
     let get_relocs section =
       match SMap.find_opt section !rel_cache with
       | Some rels -> rels
-      | None ->
-        if machine = Elf_header.elf_ma_aarch64 then
-          Error.bind
-            (Elf_symbolic.extract_elf64_relocations_for_section f Abi_aarch64_symbolic_relocation.aarch64_relocation_interpreter section)
-            @@ fun relocs -> Error.return (AArch64 relocs)
-        else
-          Error.fail @@ "machine not supported " ^ (Elf_header.string_of_elf_machine_architecture machine)
+      | None -> get_relocations_for_section f section
     in
     List.filter_map (
       fun entry ->

@@ -72,7 +72,7 @@ type t =
   | RegisterOffset of State.Reg.t * int  (** At register + offset address *)
   | StackFrame of int  (** On the stackFrame with offset *)
   | Global of Elf.SymTable.sym_offset  (** Global variable with an offset *)
-  | Const of Z.t
+  | Const of Sym.t
   | Dwarf of dwop list  (** Uninterpreted dwarf location *)
 
 (** The type of a location in linksem format *)
@@ -125,12 +125,12 @@ let of_linksem ?(amap = Arch.dwarf_reg_map ()) (elf : Elf.File.t) : linksem_t ->
       let addr = Addr.of_sym @@ sym_of_oav arg in
       try Global (Elf.SymTable.of_addr_with_offset elf.symbols @@ addr)
       with Not_found ->
-        warn "Symbol at 0x%x not found in Loc.of_linksem" (int_of_oav arg);
+        warn "Symbol at %t not found in Loc.of_linksem" (Pp.top Sym.pp (sym_of_oav arg));
         Dwarf ops
     )
   (* Other *)
   | [{ op_semantics = OpSem_lit; op_argument_values = [arg]; _ }; { op_semantics = OpSem_stack_value; _ }] ->
-      let value = Sym.to_z @@ sym_of_oav arg in 
+      let value = sym_of_oav arg in 
       Const value
   | ops -> Dwarf ops
 
@@ -140,7 +140,7 @@ let to_string = function
   | RegisterOffset (reg, off) -> Printf.sprintf "[%s+%x]" (State.Reg.to_string reg) off
   | StackFrame off -> Printf.sprintf "[frame+%x]" off
   | Global symoff -> Elf.SymTable.string_of_sym_offset symoff
-  | Const x -> Z.to_string x
+  | Const x -> Sym.to_string x
   | Dwarf ops -> Dwarf.pp_operations ops
 
 (** Compare two location. Loc.t is not compatible with polymorphic compare *)
@@ -159,7 +159,10 @@ let compare l1 l2 =
       Pair.compare ~fst:Elf.Symbol.compare (sym1, off1) (sym2, off2)
   | (Global (_, _), _) -> -1
   | (_, Global (_, _)) -> 1
-  | (Const x, Const y) -> Z.compare x y
+  | (Const (Absolute x), Const (Absolute y)) -> Z.compare x y
+  | (Const (Offset(s,x)), Const (Offset(t,y))) -> Pair.compare ~snd:Z.compare (s,x) (t,y)
+  | (Const (Absolute _), Const (Offset _)) -> -1
+  | (Const (Offset _), Const (Absolute _)) -> 1
   | (Const _, _) -> -1
   | (_, Const _) -> 1
   | (Dwarf ops1, Dwarf ops2) -> compare ops1 ops2

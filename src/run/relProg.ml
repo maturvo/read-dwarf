@@ -82,7 +82,11 @@ let eval_loc ?frame_value sz st (loc: Dw.Loc.t) : State.Exp.t option =
       let addr = Elf.SymTable.to_addr_offset symoff in
       let addr = State.Exp.of_address ~size:Arch.address_size addr in
       Some (read_big ~prov:None st addr sz)
-  | Const x -> Some(x |> BitVec.of_z ~size:(8*sz) |> Exp.Typed.bits)
+  | Const x ->
+      Some (match x with
+      | Absolute x -> x |> BitVec.of_z ~size:(8*sz) |> Exp.Typed.bits
+      | Offset (s, o) -> State.Exp.of_address ~size:(8*sz) Elf.Address.{section=s; offset=Z.to_int o}
+      )
   | Dwarf _ops -> None
 
 let eval_loc_from_list ?frame_value sz st pc locs=

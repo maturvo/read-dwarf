@@ -159,7 +159,6 @@ let of_file (filename : string) =
         None
       in
       let data = section.elf64_section_body in
-      Printf.printf "%t" Pp.(top BytesSeq.pp data);
       let relocations = match LinksemRelocatable.get_relocations_for_section elf64_file sname with
       | Error.Fail s -> elferror "LinksemRelocatable: get_relocations_for_section: %s" s
       | Error.Success x -> Relocations.of_linksem x

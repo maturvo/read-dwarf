@@ -669,12 +669,8 @@ let read_from_rodata (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t option
         if rodata.addr <= int_addr && int_addr + size <= rodata.addr + rodata.size then
           let data, relocations = rodata.data in
           let data = BytesSeq.sub data (int_addr - rodata.addr) size in
-          base "Addr offset: %d, size: %d" int_addr size;
-          base "All relocs: %t" (Pp.top Elf.Relocations.pp relocations);
           let relocations = Elf.Relocations.sub relocations (int_addr - rodata.addr) size in
-          base "Sub relocs: %t" (Pp.top Elf.Relocations.pp relocations);
           let value, asserts = Relocation.exp_of_data {data; relocations} in
-          base "Value: %t" (Pp.top Exp.pp value);
           
           if not @@ List.is_empty asserts then
             warn "Relocaiton assserts in .rodata ignored: %t" Pp.(top (list Exp.pp) asserts);

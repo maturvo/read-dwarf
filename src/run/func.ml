@@ -52,7 +52,7 @@ open Logs.Logger (struct
   let str = __MODULE__
 end)
 
-let no_run_prep ~elf:elfname ~name ~entry ?(init = State.init_sections_symbolic ~addr_size:Arch.address_size) () =
+let no_run_prep ~elf:elfname ~name ~entry ?(init = State.init_sections_symbolic ~sp:Arch.sp ~addr_size:Arch.address_size) () =
   base "Running %s in %s" name elfname;
   let dwarf = Dw.of_file elfname in
   let elf = dwarf.elf in
@@ -66,7 +66,7 @@ let no_run_prep ~elf:elfname ~name ~entry ?(init = State.init_sections_symbolic 
   let abi = Arch.get_abi api in
   Trace.Cache.start @@ Arch.get_isla_config ();
   base "Computing entry state";
-  let start = Init.state () |> State.copy ~elf |> init |> abi.init in
+  let start = Init.state () |> State.copy ~elf |> abi.init |> init in
   if entry then base "Entry state:\n%t" (Pp.topi State.pp start);
   (dwarf, elf, func, start)
 

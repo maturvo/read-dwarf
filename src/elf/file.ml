@@ -145,11 +145,16 @@ let of_file (filename : string) =
      - the range of the section is guaranteed to overlap with any symbols
        within it, and so not suitable to be stored in the [RngMap] *)
   let elf_file = Elf_file.ELF_File_64 elf64_file in
-  let sections = List.map (fun (s:Elf_interpreted_section.elf64_interpreted_section) -> {
-    name=s.elf64_section_name_as_string;
-    size=Z.to_int s.elf64_section_size;
-    align=Z.to_int s.elf64_section_align;
-  }) elf64_file.elf64_file_interpreted_sections
+  let sections = List.filter_map (fun (s:Elf_interpreted_section.elf64_interpreted_section) ->
+    if Z.equal Z.zero (Z.logand s.elf64_section_flags Elf_section_header_table.shf_alloc) then
+      None
+    else
+      Some {
+        name=s.elf64_section_name_as_string;
+        size=Z.to_int s.elf64_section_size;
+        align=Z.to_int s.elf64_section_align;
+      }
+  ) elf64_file.elf64_file_interpreted_sections
   in
   let rodata =
     SMap.of_list @@ List.filter_map Option.(fun (section:Elf_interpreted_section.elf64_interpreted_section) ->

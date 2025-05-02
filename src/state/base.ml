@@ -537,63 +537,6 @@ let set_impossible state =
   assert (not @@ is_locked state);
   state.asserts <- [Typed.false_]
 
-let push_section_constraints ~addr_size state sections =
-  List.iter (fun (s:Elf.File.section) ->
-    let max_section_addr = Int.shift_left 1 addr_size - s.size in
-    let s_exp = (Exp.of_var (Var.Section s.name)) in
-    (* The whole section fits in memory *)
-    push_assert state Typed.(comp Ast.Bvule s_exp (bits_int ~size:64 max_section_addr));
-    (* The load address cannot be 0 *)
-    push_assert state Typed.(not (s_exp = (bits_int ~size:64 0)));
-    if s.align > 1 then
-      let (align_pow, _) = Seq.ints 0
-      |> Seq.drop_while (fun x -> Int.shift_left 1 x < s.align)
-      |> Seq.uncons
-      |> Option.get
-      in
-      if s.align = Int.shift_left 1 align_pow then
-        let last = align_pow - 1 in
-        (* Section address is aligned *)
-        push_assert state Typed.(extract ~first:0 ~last s_exp = zero ~size:align_pow)
-      else
-        warn "Section alignment is not a power of two: %d" s.align;
-  ) sections
-
-let init_sections ~addr_size state =
-  let state = copy_if_locked state in
-  let _ = Option.(
-    let+ elf = state.elf in
-    state.mem.allow_main <- false;
-    push_section_constraints ~addr_size state elf.sections;
-    List.iter (fun (x:Elf.File.section) -> Mem.create_section_frag ~addr_size state.mem x.name |> ignore) elf.sections;
-    Elf.SymTable.iter elf.symbols @@ fun sym ->
-      let len = List.find (fun x -> sym.size mod x = 0) [16;8;4;2;1] in
-      if sym.typ = Elf.Symbol.OBJECT then
-        let provenance = Mem.get_section_provenance state.mem sym.addr.section in
-        Seq.iota_step_up ~step:len ~endi:sym.size
-        |> Seq.iter (fun off ->
-          let data = Elf.Symbol.sub sym off len in
-          let addr = Exp.of_address ~size:addr_size Elf.Address.(sym.addr + off) in
-          let size = Ast.Size.of_bytes len in
-          let (exp, asserts) = Relocation.exp_of_data data in
-          Mem.write ~provenance state.mem ~addr ~size ~exp;
-          List.iter (push_relocation_assert state) asserts;
-        )
-  ) in
-  state
-
-let init_sections_symbolic ~addr_size state =
-  let state = copy_if_locked state in
-  let _ = Option.(
-    let+ elf = state.elf in
-    push_section_constraints ~addr_size state elf.sections;
-    Elf.SymTable.iter elf.symbols @@ fun sym ->
-      if sym.typ = Elf.Symbol.OBJECT then
-        Hashtbl.replace state.mem.sections sym.addr.section Main
-  ) in
-  state
-
-
 let map_mut_exp (f : exp -> exp) s : unit =
   assert (not @@ is_locked s);
   Reg.Map.map_mut_current (Tval.map_exp f) s.regs;
@@ -780,6 +723,88 @@ let concretize_pc ~(pc : Reg.t) (s : t) =
 let set_last_pc state pc =
   assert (not @@ is_locked state);
   state.last_pc <- pc
+
+
+let push_section_constraints ~sp ~addr_size state sections =
+  let sp = sp () in
+  let rec f : Elf.File.section list -> unit = function
+  | [] -> ()
+  | s::rest -> (
+    let max_section_addr = Int.shift_left 1 addr_size - s.size in
+    let s_exp = (Exp.of_var (Var.Section s.name)) in
+    (* The whole section fits in memory *)
+    push_assert state Typed.(comp Ast.Bvule s_exp (bits_int ~size:64 max_section_addr));
+    (* The load address cannot be 0 *)
+    push_assert state Typed.(not (s_exp = (bits_int ~size:64 0)));
+    if s.align > 1 then (
+      let (align_pow, _) = Seq.ints 0
+      |> Seq.drop_while (fun x -> Int.shift_left 1 x < s.align)
+      |> Seq.uncons
+      |> Option.get
+      in
+      if s.align = Int.shift_left 1 align_pow then
+        let last = align_pow - 1 in
+        (* Section address is aligned *)
+        push_assert state Typed.(extract ~first:0 ~last s_exp = zero ~size:align_pow)
+      else
+        warn "Section alignment is not a power of two: %d" s.align
+    );
+    (* Sections don't overlap *)
+    let s_end = Typed.(s_exp + bits_int ~size:64 s.size) in (* we know this doesn't overflow thanks to the other constraints *)
+    List.iter (fun (s2:Elf.File.section) ->
+      let s2_exp = (Exp.of_var (Var.Section s2.name)) in
+      let s2_end = Typed.(s2_exp + bits_int ~size:64 s2.size) in
+      let order1 = Typed.(comp Ast.Bvule s_end s2_exp) in
+      let order2 = Typed.(comp Ast.Bvule s2_end s_exp) in
+      push_assert state Typed.(manyop Or [order1; order2])
+    ) rest;
+    (* Doesn't overlap with stack *)
+    let stack_end = get_reg_exp state sp in
+    let stack_start = Typed.(stack_end - bits_int ~size:64 0x1000) in
+    let order1 = Typed.(comp Ast.Bvule s_end stack_start) in
+    let order2 = Typed.(comp Ast.Bvule stack_end s_exp) in
+    push_assert state Typed.(manyop Or [order1; order2]);
+
+    f rest
+  )
+  in
+  f sections
+
+let init_sections ~sp ~addr_size state =
+  let state = copy_if_locked state in
+  let _ = Option.(
+    let+ elf = state.elf in
+    state.mem.allow_main <- false;
+    push_section_constraints ~sp ~addr_size state elf.sections;
+    List.iter (fun (x:Elf.File.section) -> Mem.create_section_frag ~addr_size state.mem x.name |> ignore) elf.sections;
+    Elf.SymTable.iter elf.symbols @@ fun sym ->
+      let len = List.find (fun x -> sym.size mod x = 0) [16;8;4;2;1] in
+      if sym.typ = Elf.Symbol.OBJECT then
+        let provenance = Mem.get_section_provenance state.mem sym.addr.section in
+        Seq.iota_step_up ~step:len ~endi:sym.size
+        |> Seq.iter (fun off ->
+          let data = Elf.Symbol.sub sym off len in
+          let addr = Exp.of_address ~size:addr_size Elf.Address.(sym.addr + off) in
+          let size = Ast.Size.of_bytes len in
+          let (exp, asserts) = Relocation.exp_of_data data in
+          Mem.write ~provenance state.mem ~addr ~size ~exp;
+          List.iter (push_relocation_assert state) asserts;
+        )
+  ) in
+  lock state;
+  state
+
+let init_sections_symbolic ~sp ~addr_size state =
+  let state = copy_if_locked state in
+  let _ = Option.(
+    let+ elf = state.elf in
+    push_section_constraints ~sp ~addr_size state elf.sections;
+    Elf.SymTable.iter elf.symbols @@ fun sym ->
+      if sym.typ = Elf.Symbol.OBJECT then
+        Hashtbl.replace state.mem.sections sym.addr.section Main
+  ) in
+  lock state;
+  state
 
 let pp s =
   let open Pp in

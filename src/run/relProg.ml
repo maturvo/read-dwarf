@@ -159,7 +159,7 @@ let run_prog elfname name objdump_d branchtables =
       instr
   in
   base "Start running";
-  let tree = Func.get_state_tree ~elf:elfname ~name ~init:(State.init_sections ~addr_size:Arch.address_size) ~every_instruction:true ()
+  let tree = Func.get_state_tree ~elf:elfname ~name ~init:(State.init_sections ~sp:Arch.sp ~addr_size:Arch.address_size) ~every_instruction:true ()
     ~breakpoints:["UND.abort"; "UND.exit"]
   in
   base "Ended running, start pretty printing";

@@ -74,7 +74,7 @@ let run_func_rd elfname name objdump_d branchtables breakpoints =
   let abi = Arch.get_abi api in
   Trace.Cache.start @@ Arch.get_isla_config ();
   base "Computing entry state";
-  let start = Init.state () |> State.copy ~elf |> State.init_sections ~addr_size:Arch.address_size |> abi.init in
+  let start = Init.state () |> State.copy ~elf |> abi.init |> State.init_sections ~sp:Arch.sp ~addr_size:Arch.address_size in
   base "Loading %s for Analyse" elfname;
   let analyse_test = Analyse.Elf.parse_elf_file elfname in
   base "Analysing %s for Analyse" elfname;

@@ -75,7 +75,7 @@ let rec process_tree ~pc ~ret ~ext (node:Block_lib.label State.Tree.t) =
     }
 
 let test return_register exit_register name =
-  let tree = Func.get_state_tree ~elf:name ~name:"main" ~init:(State.init_sections ~addr_size:Arch.address_size) ~every_instruction:false ()
+  let tree = Func.get_state_tree ~elf:name ~name:"main" ~init:(State.init_sections ~sp:Arch.sp ~addr_size:Arch.address_size) ~every_instruction:false ()
     ~breakpoints:["UND.abort"; "UND.exit"]
   in
   debug "%t" (Pp.top (State.Tree.pp_all Block_lib.pp_label) tree);

@@ -405,10 +405,10 @@ val copy : ?elf:Elf.File.t -> t -> t
     The returned state is always unlocked *)
 val copy_if_locked : ?elf:Elf.File.t -> t -> t
 
-val init_sections : addr_size:int -> t -> t
+val init_sections : sp:(unit -> Reg.t) -> addr_size:int -> t -> t
 
 (** Assigns all sections with global objects to Main fragment *)
-val init_sections_symbolic : addr_size:int -> t -> t
+val init_sections_symbolic : sp:(unit -> Reg.t) -> addr_size:int -> t -> t
 
 
 (** {1 State convenience manipulation } *)

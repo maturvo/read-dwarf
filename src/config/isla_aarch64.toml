@@ -141,6 +141,7 @@ ignore = [
 # Bit 1 being unset allows unaligned accesses
 # Bit 26 being set allows cache-maintenance ops in EL0
 "SCTLR_EL1" = "0x0000000004000000"
+"SCTLR_EL2" = "0x0000000004000000"
 
 # A map from register names that may appear in litmus files to Sail
 # register names

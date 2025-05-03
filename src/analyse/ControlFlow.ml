@@ -119,11 +119,11 @@ let branch_table_target_addresses test filename_branch_table_option : (addr * ad
               with
               | (a_br, a_table, n, shift, a_offset) ->
                   Some
-                    ( Nat_big_num.of_int a_br,
-                      ( Nat_big_num.of_int a_table,
-                        Nat_big_num.of_int n,
+                    ( Sym.of_int a_br,
+                      ( Sym.of_int a_table,
+                        Sym.of_int n,
                         shift,
-                        Nat_big_num.of_int a_offset ) )
+                        Sym.of_int a_offset ) )
               | exception _ -> fatal "couldn't parse branch table data file line: \"%s\"\n" s
             in
             List.filter_map parse_line (List.tl (Array.to_list lines))
@@ -131,7 +131,7 @@ let branch_table_target_addresses test filename_branch_table_option : (addr * ad
   in
 
   (* pull out .rodata section from ELF *)
-  let ((_, rodata_addr, bs) as _rodata : Dwarf.p_context * Nat_big_num.num * BytesSeq.t) =
+  let ((_, rodata_addr, bs) as _rodata : Dwarf.p_context * Sym.t * BytesSeq.t) =
     Dwarf.extract_section_body_without_relocations test.elf_file ".rodata" false
   in
   (* chop into bytes *)
@@ -139,41 +139,42 @@ let branch_table_target_addresses test filename_branch_table_option : (addr * ad
 
   (* chop into 4-byte words - as needed for branch offset tables,
      though not for all other things in .rodata *)
-  let rodata_words : (natural * natural) list = Dwarf.words_of_rel_byte_sequence rodata_addr (Dwarf.rbs_no_reloc bs) [] in (*HACK*)
+  let rodata_words : (natural * natural) list =
+    Dwarf.words_of_sym_byte_sequence rodata_addr (Dwarf_byte_sequence.sym_bs_construct bs (Pmap.empty Nat_big_num.compare)) [] in (*HACK*)
 
   let read_rodata_b addr =
-    Elf_types_native_uint.natural_of_byte
-      rodata_bytes.(Nat_big_num.to_int (Nat_big_num.sub addr rodata_addr))
+    Dwarf.sym_natural_of_byte
+      rodata_bytes.(Sym.to_int (Sym.sub addr rodata_addr))
   in
   let read_rodata_h addr =
-    Nat_big_num.add (read_rodata_b addr)
-      (Nat_big_num.mul (Nat_big_num.of_int 256)
-         (read_rodata_b (Nat_big_num.add addr (Nat_big_num.of_int 1))))
+    Sym.add (read_rodata_b addr)
+      (Sym.mul (Sym.of_int 256)
+         (read_rodata_b (Sym.add addr (Sym.of_int 1))))
   in
 
   let sign_extend_W n =
-    let half = Nat_big_num.mul (Nat_big_num.of_int 65536) (Nat_big_num.of_int 32768) in
-    let whole = Nat_big_num.mul half (Nat_big_num.of_int 2) in
-    if Nat_big_num.greater_equal n half then Nat_big_num.sub n whole else n
+    let half = Sym.mul (Sym.of_int 65536) (Sym.of_int 32768) in
+    let whole = Sym.mul half (Sym.of_int 2) in
+    if Sym.greater_equal n half then Sym.sub n whole else n
   in
 
   let read_rodata_W addr =
     sign_extend_W
-      (Nat_big_num.add (read_rodata_b addr)
-         (Nat_big_num.add
-            (Nat_big_num.mul (Nat_big_num.of_int 256)
-               (read_rodata_b (Nat_big_num.add addr (Nat_big_num.of_int 1))))
-            (Nat_big_num.add
-               (Nat_big_num.mul (Nat_big_num.of_int 65536)
-                  (read_rodata_b (Nat_big_num.add addr (Nat_big_num.of_int 2))))
-               (Nat_big_num.mul (Nat_big_num.of_int 16777216)
-                  (read_rodata_b (Nat_big_num.add addr (Nat_big_num.of_int 3)))))))
+      (Sym.add (read_rodata_b addr)
+         (Sym.add
+            (Sym.mul (Sym.of_int 256)
+               (read_rodata_b (Sym.add addr (Sym.of_int 1))))
+            (Sym.add
+               (Sym.mul (Sym.of_int 65536)
+                  (read_rodata_b (Sym.add addr (Sym.of_int 2))))
+               (Sym.mul (Sym.of_int 16777216)
+                  (read_rodata_b (Sym.add addr (Sym.of_int 3)))))))
   in
 
   let rec natural_assoc_opt n nys =
     match nys with
     | [] -> None
-    | (n', y) :: nys' -> if Nat_big_num.equal n n' then Some y else natural_assoc_opt n nys'
+    | (n', y) :: nys' -> if Sym.equal n n' then Some y else natural_assoc_opt n nys'
   in
 
   (* this is the evaluator for a little stack-machine language used in the hafnium.branch-table files to describe the access pattern for each branch table *)
@@ -187,8 +188,8 @@ let branch_table_target_addresses test filename_branch_table_option : (addr * ad
    h          read two bytes from the branch table
    W          read four byte from the branch table and sign-extend
                                                             *)
-  let rec eval_shift_expression (shift : string) (a_table : Nat_big_num.num)
-      (a_offset : Nat_big_num.num) (i : Nat_big_num.num) (stack : Nat_big_num.num list) (pc : int)
+  let rec eval_shift_expression (shift : string) (a_table : Sym.t)
+      (a_offset : Sym.t) (i : Sym.t) (stack : Sym.t list) (pc : int)
       =
     if pc = String.length shift then
       match stack with
@@ -205,8 +206,8 @@ let branch_table_target_addresses test filename_branch_table_option : (addr * ad
         match stack with
         | a :: stack' ->
             let a' =
-              Nat_big_num.mul a
-                (Nat_big_num.pow_int_positive 2 (Char.code command - Char.code '0'))
+              Sym.mul a
+                (Sym.pow_int_positive 2 (Char.code command - Char.code '0'))
             in
             eval_shift_expression shift a_table a_offset i (a' :: stack') (pc + 1)
         | _ -> fatal "eval_shift_expression shift empty stack"
@@ -222,7 +223,7 @@ let branch_table_target_addresses test filename_branch_table_option : (addr * ad
         (* plus *)
         match stack with
         | a1 :: a2 :: stack' ->
-            let a' = Nat_big_num.add a1 a2 in
+            let a' = Sym.add a1 a2 in
             eval_shift_expression shift a_table a_offset i (a' :: stack') (pc + 1)
         | _ -> fatal "eval_shift_expression plus emptyish stack"
       else if command = 'b' then
@@ -254,24 +255,24 @@ let branch_table_target_addresses test filename_branch_table_option : (addr * ad
       (function
         | (a_br, (a_table, size, shift, a_offset)) ->
             let rec f i =
-              if i > Nat_big_num.to_int size then []
+              if i > Sym.to_int size then []
               else
                 let a_target =
                   if shift = "2" then
-                    let table_entry_addr = Nat_big_num.add a_table (Nat_big_num.of_int (4 * i)) in
+                    let table_entry_addr = Sym.add a_table (Sym.of_int (4 * i)) in
                     match natural_assoc_opt table_entry_addr rodata_words with
                     | None ->
                         fatal "no branch table entry for address %s\n" (pp_addr table_entry_addr)
                     | Some table_entry ->
                         let a_target =
-                          Nat_big_num.modulus
-                            (Nat_big_num.add a_table table_entry)
-                            (Nat_big_num.pow_int_positive 2 32)
+                          Sym.modulus
+                            (Sym.add a_table table_entry)
+                            (Sym.pow_int_positive 2 32)
                         in
                         (* that 32 is good for the sign-extended negative 32-bit offsets we see
                            in the old hafnium-playground-src branch tables *)
                         a_target
-                  else eval_shift_expression shift a_table a_offset (Nat_big_num.of_int i) [] 0
+                  else eval_shift_expression shift a_table a_offset (Sym.of_int i) [] 0
                 in
                 a_target :: f (i + 1)
             in
@@ -289,10 +290,10 @@ let branch_table_target_addresses test filename_branch_table_option : (addr * ad
 
 let parse_addr (s : string) : natural =
 try 
-  Scanf.sscanf s "0x%Lx" (fun i64 -> Nat_big_num.of_int64 i64)
+  Scanf.sscanf s "0x%Lx" (fun i64 -> Sym.of_int64 i64)
 with
-  Scanf.Scan_failure _  ->
-   Scanf.sscanf s "%Lx" (fun i64 -> Nat_big_num.of_int64 i64)
+  (Scanf.Scan_failure _ | End_of_file)  ->
+   Scanf.sscanf s "%Lx" (fun i64 -> Sym.of_int64 i64)
 
 let parse_target s =
   match Scanf.sscanf s " %s %s" (fun s1 s2 -> (s1, s2)) with
@@ -360,7 +361,7 @@ let parse_control_flow_instruction s mnemonic s' : control_flow_insn =
 
 let targets_of_control_flow_insn_without_index branch_table_targets (addr : natural)
     (opcode_bytes : int list) (c : control_flow_insn) : (target_kind * addr * string) list =
-  let succ_addr = Nat_big_num.add addr (Nat_big_num.of_int (List.length opcode_bytes)) in
+  let succ_addr = Sym.add addr (Sym.of_int (List.length opcode_bytes)) in
   let targets =
     match c with
     | C_no_instruction -> []
@@ -440,12 +441,21 @@ AArch64:
 let objdump_line_regexp =
   Str.regexp " *\\([0-9a-fA-F]+\\):[ \t]\\([0-9a-fA-F ]+\\)\t\\([^ \r\t\n]+\\) *\\(.*\\)$"
 
+let section_start_line_regexp =
+  Str.regexp "Disassembly of section \\(.*\\):$"
+
 type objdump_instruction =
   natural (*address*) * int list (*opcode bytes*) * string (*mnemonic*) * string
 
 (*args etc*)
 
-let parse_objdump_line (s : string) : objdump_instruction option =
+let parse_section_start s =
+  if Str.string_match section_start_line_regexp s 0 then
+    Some (Str.matched_group 1 s)
+  else
+    None
+
+let parse_objdump_line (s : string) : (int64 * int list * string * string) option =
   let parse_hex_int64 s' =
     try Scanf.sscanf s' "%Lx" (fun i64 -> i64)
     with _ -> fatal "cannot parse address in objdump line %s\n" s
@@ -465,7 +475,6 @@ let parse_objdump_line (s : string) : objdump_instruction option =
   if Str.string_match objdump_line_regexp s 0 then
     begin
       let addr_int64 = parse_hex_int64 (Str.matched_group 1 s) in
-      let addr = Nat_big_num.of_int64 addr_int64 in
       let op = Str.matched_group 2 s in
       let op = strip_whitespace op in
       let opcode_byte_strings =
@@ -477,7 +486,7 @@ let parse_objdump_line (s : string) : objdump_instruction option =
       let opcode_bytes = List.map parse_hex_int opcode_byte_strings in
       let mnemonic = Str.matched_group 3 s in
       let operands = Str.matched_group 4 s in
-      Some (addr, opcode_bytes, mnemonic, operands)
+      Some (addr_int64, opcode_bytes, mnemonic, operands)
     end
   else None
 
@@ -486,30 +495,35 @@ let parse_objdump_lines arch lines : objdump_instruction list =
   List.filter_map (parse_objdump_line arch) (Array.to_list lines)
  *)
 
-let rec parse_objdump_lines arch lines (next_index : int) (last_address : natural option) :
+let with_symbolic_address (section: string) (addr, opcode_bytes, mnemonic, operands) : objdump_instruction =
+  (Sym_ocaml.Num.Offset (section, Nat_big_num.of_int64 addr), opcode_bytes, mnemonic, operands)
+
+let rec parse_objdump_lines arch lines (next_index : int) (last_address : int64 option) (section: string option) :
     objdump_instruction list =
   if next_index >= Array.length lines then []
   else
+    let section = Option.fold ~none:section ~some:Option.some @@ parse_section_start lines.(next_index) in
     match parse_objdump_line lines.(next_index) with
     (* skip over unparseable lines *)
-    | None -> parse_objdump_lines arch lines (next_index + 1) last_address
+    | None -> parse_objdump_lines arch lines (next_index + 1) last_address section
     | Some ((addr, _opcode_bytes, _mnemonic, _operands) as i) -> (
+        let mki = with_symbolic_address (Option.get section) in
         match last_address with
-        | None -> i :: parse_objdump_lines arch lines (next_index + 1) (Some addr)
+        | None -> mki i :: parse_objdump_lines arch lines (next_index + 1) (Some addr) section
         | Some last_address' ->
-            let last_address'' = Nat_big_num.add last_address' (Nat_big_num.of_int 4) in
+            let last_address'' = Int64.add last_address' (Int64.of_int 4) in
             if addr > last_address'' then
               (* fake up "missing" instructions for any gaps in the address space*)
               (*warn "gap in objdump instruction address sequence at %s" (pp_addr last_address'');*)
-              (last_address'', [], "missing", "")
-              :: parse_objdump_lines arch lines next_index (Some last_address'')
-            else i :: parse_objdump_lines arch lines (next_index + 1) (Some addr)
+              mki (last_address'', [], "missing", "")
+              :: parse_objdump_lines arch lines next_index (Some last_address'') section
+            else mki i :: parse_objdump_lines arch lines (next_index + 1) (Some addr) section
       )
 
 let parse_objdump_file arch filename_objdump_d : objdump_instruction array =
   match read_file_lines filename_objdump_d with
   | Error s -> fatal "%s\ncouldn't read objdump-d file: \"%s\"\n" s filename_objdump_d
-  | Ok lines -> Array.of_list (parse_objdump_lines arch lines 0 None)
+  | Ok lines -> Array.of_list (parse_objdump_lines arch lines 0 None None)
 
 (*****************************************************************************)
 (**  parse control-flow instruction asm from objdump and branch table data   *)
@@ -602,11 +616,11 @@ let highlight c =
 
 (* highlight branch targets to earlier addresses*)
 let pp_target_addr_wrt (addr : natural) (c : control_flow_insn) (a : natural) =
-  (if highlight c && Nat_big_num.less a addr then "^" else "") ^ pp_addr a
+  (if highlight c && Sym.less a addr then "^" else "") ^ pp_addr a
 
 (* highlight branch come-froms from later addresses*)
 let pp_come_from_addr_wrt (addr : natural) (c : control_flow_insn) (a : natural) =
-  (if highlight c && Nat_big_num.greater a addr then "v" else "") ^ pp_addr a
+  (if highlight c && Sym.greater a addr then "v" else "") ^ pp_addr a
 
 (*
 let pp_branch_targets (xs : (addr * control_flow_insn * (target_kind * addr * int * string) list) list)

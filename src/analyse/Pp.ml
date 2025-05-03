@@ -574,7 +574,7 @@ let pp_instructions_ranged m test an (low, high) =
   Printf.printf "pp_instructions_ranged indices: low=%i  high=%i \n"   (an.index_of_address low)  (an.index_of_address high);
  *)
   let index_low = an.index_of_address low in
-  let index_high = (an.index_of_address (Nat_big_num.sub high (Nat_big_num.of_int 4)))+1 in
+  let index_high = (an.index_of_address (Sym.sub high (Sym.of_int 4)))+1 in
   let rec subarray_map_to_list f a k k' =
     if k >= k' then [] else f k a.(k) :: subarray_map_to_list f a (k + 1) k'
   in
@@ -857,7 +857,6 @@ let pp_test_analysis m test an =
       call_graph ^ "* ************* transitive call graph **************\n"
       ^ transitive_call_graph
   | Html ->
-     ""
-     (* "\n* ************* instructions *****************\n" *)
-       (*pp_instruction_init ();
-      String.concat "" (Array.to_list (Array.mapi (pp_instruction m test an 0) an.instructions))*)
+     "\n* ************* instructions *****************\n"
+     ^ (pp_instruction_init ();
+      String.concat "" (Array.to_list (Array.mapi (pp_instruction m test an 0) an.instructions)))

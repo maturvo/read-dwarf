@@ -85,8 +85,10 @@ module Opcode (*: Cache.Key *) = struct
   | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data320) -> 2
   | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADRP) -> 3
   | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADD) -> 4
-  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.LDST) -> 5
-  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL) -> 6
+  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL) -> 5
+  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.LDST b) -> assert (b < 5); 6 + b
+  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CONDBR) -> 11
+  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.B) -> 12
 
   let reloc_of_id: int -> Relocation.t option = function
   | 0 -> None
@@ -94,9 +96,11 @@ module Opcode (*: Cache.Key *) = struct
   | 2 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.Data320)
   | 3 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADRP)
   | 4 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADD)
-  | 5 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.LDST)
-  | 6 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL)
-  | _ -> Raise.fail "invalid reloc id"
+  | 5 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL)
+  | x when x < 11 -> Some (Elf.Relocations.AArch64 (Abi_aarch64_symbolic_relocation.LDST (x-6)))
+  | 11 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CONDBR)
+  | 12 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.B)
+  | x -> fail "Invalid relocation id %d" x
 
   let equal a b =
     match (a, b) with
@@ -105,7 +109,7 @@ module Opcode (*: Cache.Key *) = struct
     | _ -> false
 
   let small_enough bs rel_id =
-    BytesSeq.length bs < BytesSeq.int_bytes && rel_id < 8
+    BytesSeq.length bs < (BytesSeq.int_bytes-1) && rel_id < (8*256)
 
   let hash = function
     | None -> 0
@@ -116,7 +120,7 @@ module Opcode (*: Cache.Key *) = struct
         if small_enough bs rel_id then begin
           assert (not @@ IntBits.get i IntBits.back);
           let res = IntBits.blit l 0 i (IntBits.back - 3) 3 in
-          let res = IntBits.blit rel_id 0 res (IntBits.back - 6) 3 in
+          let res = IntBits.blit rel_id 0 res (IntBits.back - 14) 11 in
           res
         end
         else IntBits.set i IntBits.back
@@ -134,8 +138,8 @@ module Opcode (*: Cache.Key *) = struct
     else if IntBits.get hash IntBits.back then
       Raise.todo()
     else
-      let data = IntBits.sub hash 0 (IntBits.back - 6) in
-      let reloc_id = IntBits.sub hash (IntBits.back - 6) 3 in
+      let data = IntBits.sub hash 0 (IntBits.back - 14) in
+      let reloc_id = IntBits.sub hash (IntBits.back - 14) 11 in
       let size = IntBits.sub hash (IntBits.back - 3) 3 in
       let b = Bytes.create size in
       Bits.unsafe_blit_of_int data 0 b 0 (size * 8);

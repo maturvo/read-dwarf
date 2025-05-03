@@ -62,6 +62,8 @@ end
 type id = Id.t
 
 module Var = struct
+  let next_nondet = ref 0
+
   type t =
     | Register of Id.t * Reg.t  (** The value of this register in this state *)
     | ReadVar of Id.t * int * Ast.Size.t
@@ -159,6 +161,11 @@ module Var = struct
     | RetAddr -> Ast.Ty_BitVec 64
     | NonDet (_, size) -> Ast.Ty_BitVec (Ast.Size.to_bits size)
     | Section _ -> Ast.Ty_BitVec 64
+
+  let new_nondet sz =
+    let v = NonDet (!next_nondet, sz) in
+    next_nondet := !next_nondet + 1;
+    v
 end
 
 type var = Var.t
@@ -257,7 +264,7 @@ module Relocation = struct
       | Alignment b ->
         let last = b-1 in
         Typed.(extract ~first:0 ~last value = bits_int ~size:b 0)
-    ) relocation.assertions in
+    ) relocation.checks in
     let (last, first) = relocation.mask in
     let value = Typed.extract ~first ~last value in
     { value; asserts; target = relocation.target }
@@ -287,10 +294,12 @@ module Relocation = struct
       else
         []
       in
+      let v, a =
       (
-        Typed.concat (before @ relocation.value :: after),
+        Typed.concat (after @ relocation.value :: before),
         relocation.asserts @ asserts
-      )
+      ) in
+      v,a
     ) data.relocations (exp, [])
 end
 
@@ -313,24 +322,26 @@ module Mem = struct
     mutable main : Fragment.t;
     frags : (Exp.t * Fragment.t) Vec.t;
     sections : (string, provenance) Hashtbl.t; (* mapping sections to their fragments *)
+    mutable allow_main : bool; (* HACK to prvent incorrectly assuming Main provenance when using section fragments  *)
   }
 
   (** Get the main fragment of memory *)
-  let get_main { main; frags = _; sections = _ } = main
+  let get_main { main; _ } = main
 
   (** Empty memory, every address is unbound *)
-  let empty () = { main = Fragment.empty; frags = Vec.empty (); sections = Hashtbl.create 10 }
+  let empty () = { main = Fragment.empty; frags = Vec.empty (); sections = Hashtbl.create 10; allow_main = true }
 
   (** Build a new memory from the old one by keeping the old one as a base *)
   let from mem =
     { 
       main = Fragment.from mem.main;
       frags = Vec.map (Pair.map Fun.id Fragment.from) mem.frags;
-      sections = Hashtbl.copy mem.sections; 
+      sections = Hashtbl.copy mem.sections;
+      allow_main = mem.allow_main;
     }
 
   (** Copy the memory so that it can be mutated separately *)
-  let copy mem = { main = mem.main; frags = Vec.copy mem.frags; sections = Hashtbl.copy mem.sections }
+  let copy mem = { main = mem.main; frags = Vec.copy mem.frags; sections = Hashtbl.copy mem.sections; allow_main = mem.allow_main }
 
   (** Add a new fragment with the specified base *)
   let new_frag mem base =
@@ -526,21 +537,6 @@ let set_impossible state =
   assert (not @@ is_locked state);
   state.asserts <- [Typed.false_]
 
-let init_sections ~addr_size state =
-  let state = copy_if_locked state in
-  let _ = Option.(
-    let+ elf = state.elf in
-    Elf.SymTable.iter elf.symbols @@ fun sym ->
-      if sym.typ = Elf.Symbol.OBJECT then
-        let provenance = Mem.create_section_frag ~addr_size state.mem sym.addr.section in
-        let addr = Exp.of_address ~size:addr_size sym.addr in
-        let size = Ast.Size.of_bytes sym.size in
-        let (exp, asserts) = Relocation.exp_of_data sym.data in
-        Mem.write ~provenance state.mem ~addr ~size ~exp;
-        List.iter (push_relocation_assert state) asserts;
-  ) in
-  state
-
 let map_mut_exp (f : exp -> exp) s : unit =
   assert (not @@ is_locked s);
   Reg.Map.map_mut_current (Tval.map_exp f) s.regs;
@@ -567,46 +563,15 @@ let set_read (s : t) (read_num : int) (exp : Exp.t) =
   assert (Typed.get_type exp = Typed.get_type (Vec.get s.read_vars read_num |> Tval.exp));
   Vec.update s.read_vars read_num @@ Tval.map_exp (Fun.const exp)
 
-let read_from_rodata (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t option =
-  match s.elf with
-  | None -> None
-  | Some elf -> (
-      if not @@ ConcreteEval.is_concrete addr then None
-      else
-        let int_addr = ConcreteEval.eval addr |> Value.expect_bv |> BitVec.to_int in
-        let sym_addr = Elf.Address.{ section = ".rodata"; offset = int_addr } in (* TODO this is wrong *)
-        let size = size |> Ast.Size.to_bits in
-        try
-          let (sym, offset) = Elf.SymTable.of_addr_with_offset elf.symbols sym_addr in
-          if sym.writable then None
-          else
-            (* Assume little endian here *)
-            let bv = BytesSeq.getbvle ~size sym.data.data offset in (* TODO relocations *)
-            Some (Typed.bits bv)
-        with Not_found ->
-          let rodata = elf.rodata in
-          if rodata.addr <= int_addr && int_addr + size < rodata.addr + rodata.size then
-            let bv = BytesSeq.getbvle ~size rodata.data (int_addr - rodata.addr) in
-            (* Assume little endian here *)
-            Some (Typed.bits bv)
-          else (
-            warn "Failed to find symbol or rodata at 0x%x" int_addr;
-            None
-          )
-    )
-
-let read ~provenance ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
-  assert (not @@ is_locked s);
-  let var = make_read ?ctyp s size in
-  let exp = Mem.read s.mem ~provenance ~var ~addr ~size in
-  let exp = if provenance = Main && exp = None then read_from_rodata ~addr ~size s else exp in
-  Option.iter (set_read s (Var.expect_readvar var)) exp;
-  Option.value exp ~default:(Exp.of_var var)
-
-
 let eval_address (s : t) (addr: Exp.t) : Elf.Address.t option =
   let ctxt0 = function Var.Section _ -> Value.bv @@ BitVec.of_int ~size:64 0 | _ -> raise ConcreteEval.Symbolic in
-  let offset = addr |> ConcreteEval.eval ~ctxt:ctxt0 |> Value.expect_bv |> BitVec.to_int in
+  let open Option in
+  let* offset_exp = try
+    Some (ConcreteEval.eval ~ctxt:ctxt0 addr)
+  with
+    ConcreteEval.Symbolic -> None
+  in
+  let offset = offset_exp |> Value.expect_bv |> BitVec.to_int in
   let sections = Hashtbl.create 10 in
   Ast.Manip.exp_iter_var (function Var.Section s -> Hashtbl.add sections s () | _ -> ()) addr;
 
@@ -621,8 +586,58 @@ let eval_address (s : t) (addr: Exp.t) : Elf.Address.t option =
       None
   )
   
+let read_from_rodata (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t option =
+  debug "reading from rodata at address: %t" (Pp.top Exp.pp addr);
+  match s.elf with
+  | None -> None
+  | Some elf -> (
+      Option.bind (eval_address s addr) @@ fun sym_addr ->
+      let size = size |> Ast.Size.to_bytes in
+      try
+        let (sym, offset) = Elf.SymTable.of_addr_with_offset elf.symbols sym_addr in
+        if sym.writable then None
+        else (
+          let data = Elf.Symbol.sub sym offset size in
+          let value, asserts = Relocation.exp_of_data data in
+          
+          if not @@ List.is_empty asserts then
+            warn "Relocaiton assserts in .rodata ignored: %t" Pp.(top (list Exp.pp) asserts);
 
-let read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
+          Some value
+        )
+      with Not_found ->
+        let int_addr = sym_addr.offset in
+        let open Option in
+        let* rodata = Elf.File.SMap.find_opt sym_addr.section elf.rodata in
+        if rodata.addr <= int_addr && int_addr + size <= rodata.addr + rodata.size then
+          let data, relocations = rodata.data in
+          let data = BytesSeq.sub data (int_addr - rodata.addr) size in
+          let relocations = Elf.Relocations.sub relocations (int_addr - rodata.addr) size in
+          let value, asserts = Relocation.exp_of_data {data; relocations} in
+          
+          if not @@ List.is_empty asserts then
+            warn "Relocaiton assserts in .rodata ignored: %t" Pp.(top (list Exp.pp) asserts);
+
+          Some value
+        else (
+          warn "Failed to find symbol or rodata at %t" (Pp.top Elf.Address.pp sym_addr);
+          None
+        )
+    )
+
+let rec read ~provenance ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
+  assert (not @@ is_locked s);
+  if provenance = Ctype.Main && not s.mem.allow_main then
+    read_noprov ?ctyp s ~addr ~size
+  else
+    let var = make_read ?ctyp s size in
+    let exp = Mem.read s.mem ~provenance ~var ~addr ~size in
+    let exp = if exp = None then read_from_rodata ~addr ~size s else exp in
+    Option.iter (set_read s (Var.expect_readvar var)) exp;
+    Option.value exp ~default:(Exp.of_var var)
+
+and read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
+  debug "Addr: %t" Pp.(top Exp.pp addr);
   let elf_addr = eval_address s addr in
   debug "Address: %t" Pp.(top (optional Elf.Address.pp) elf_addr);
   match elf_addr with
@@ -630,16 +645,23 @@ let read_noprov ?ctyp (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) : Exp.t =
       let addr_size = addr |> Typed.get_type |> Typed.expect_bv in
       let addr = Exp.of_address ~size:addr_size elf_addr in
       let provenance = Mem.get_section_provenance s.mem elf_addr.section in
+      if provenance = Ctype.Main && not s.mem.allow_main then
+        Raise.fail "Main fragment should not be used here";
       read ~provenance ?ctyp s ~addr ~size
   | None when Vec.length s.mem.frags = 0 ->
+      if not s.mem.allow_main then
+        Raise.fail "Main fragment should not be used here";
       read ~provenance:Ctype.Main ?ctyp s ~addr ~size
   | None -> Raise.fail "Trying to access %t in state %d: No provenance info" Pp.(tos Exp.pp addr) s.id
 
-let write ~provenance (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.t) : unit =
+let rec write ~provenance (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.t) : unit =
   assert (not @@ is_locked s);
-  Mem.write ~provenance s.mem ~addr ~size ~exp:value
+  if provenance = Ctype.Main && not s.mem.allow_main then
+    write_noprov s ~addr ~size value
+  else
+    Mem.write ~provenance s.mem ~addr ~size ~exp:value
 
-let write_noprov (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.t) : unit =
+and write_noprov (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.t) : unit =
   let elf_addr = eval_address s addr in
   debug "Address: %t" Pp.(top (optional Elf.Address.pp) elf_addr);
   match elf_addr with
@@ -647,8 +669,12 @@ let write_noprov (s : t) ~(addr : Exp.t) ~(size : Mem.Size.t) (value : Exp.t) : 
       let addr_size = addr |> Typed.get_type |> Typed.expect_bv in
       let addr = Exp.of_address ~size:addr_size elf_addr in
       let provenance = Mem.get_section_provenance s.mem elf_addr.section in
+      if provenance = Ctype.Main && not s.mem.allow_main then
+        Raise.fail "Main fragment should not be used here";
       write ~provenance s ~addr ~size value
   | None when Vec.length s.mem.frags = 0 ->
+      if not s.mem.allow_main then
+        Raise.fail "Main fragment should not be used here";
       write ~provenance:Ctype.Main s ~addr ~size value
   | None -> Raise.fail "Trying to access %t in state %d: No provenance info" Pp.(tos Exp.pp addr) s.id
 
@@ -679,9 +705,7 @@ let set_pc ~(pc : Reg.t) (s : t) (pcval : int) =
   let ctyp = Ctype.of_frag (Ctype.Global ".text") ~offset:pcval ~constexpr:true in
   set_reg s pc @@ Tval.make ~ctyp exp
 
-(* TODO *)
 let set_pc_sym ~(pc : Reg.t) (s : t) (pcval : Elf.Address.t) =
-  (* set_pc ~pc s pcval.offset *)
   let exp = Typed.(var ~typ:(Ty_BitVec 64) (Var.Section pcval.section) + bits_int ~size:64 pcval.offset) in
   let ctyp = Ctype.of_frag (Ctype.Global ".text") ~offset:pcval.offset ~constexpr:true in
   set_reg s pc @@ Tval.make ~ctyp exp
@@ -693,15 +717,94 @@ let bump_pc ~(pc : Reg.t) (s : t) (bump : int) =
   let new_pc = Elf.Address.(old_pc + bump) in
   set_pc_sym ~pc s new_pc
 
-(* TODO section + offset *)
 let concretize_pc ~(pc : Reg.t) (s : t) =
-  let pc_exp = get_reg_exp s pc in
-  try ConcreteEval.eval pc_exp |> Value.expect_bv |> BitVec.to_int |> set_pc ~pc s
-  with ConcreteEval.Symbolic -> ()
+  pc |> get_reg_exp s |> eval_address s |> Option.iter (set_pc_sym ~pc s)
 
 let set_last_pc state pc =
   assert (not @@ is_locked state);
   state.last_pc <- pc
+
+
+let push_section_constraints ~sp ~addr_size state sections =
+  let sp = sp () in
+  let rec f : Elf.File.section list -> unit = function
+  | [] -> ()
+  | s::rest -> (
+    let max_section_addr = Int.shift_left 1 addr_size - s.size in
+    let s_exp = (Exp.of_var (Var.Section s.name)) in
+    (* The whole section fits in memory *)
+    push_assert state Typed.(comp Ast.Bvule s_exp (bits_int ~size:64 max_section_addr));
+    (* The load address cannot be 0 *)
+    push_assert state Typed.(not (s_exp = (bits_int ~size:64 0)));
+    if s.align > 1 then (
+      let (align_pow, _) = Seq.ints 0
+      |> Seq.drop_while (fun x -> Int.shift_left 1 x < s.align)
+      |> Seq.uncons
+      |> Option.get
+      in
+      if s.align = Int.shift_left 1 align_pow then
+        let last = align_pow - 1 in
+        (* Section address is aligned *)
+        push_assert state Typed.(extract ~first:0 ~last s_exp = zero ~size:align_pow)
+      else
+        warn "Section alignment is not a power of two: %d" s.align
+    );
+    (* Sections don't overlap *)
+    let s_end = Typed.(s_exp + bits_int ~size:64 s.size) in (* we know this doesn't overflow thanks to the other constraints *)
+    List.iter (fun (s2:Elf.File.section) ->
+      let s2_exp = (Exp.of_var (Var.Section s2.name)) in
+      let s2_end = Typed.(s2_exp + bits_int ~size:64 s2.size) in
+      let order1 = Typed.(comp Ast.Bvule s_end s2_exp) in
+      let order2 = Typed.(comp Ast.Bvule s2_end s_exp) in
+      push_assert state Typed.(manyop Or [order1; order2])
+    ) rest;
+    (* Doesn't overlap with stack *)
+    let stack_end = get_reg_exp state sp in
+    let stack_start = Typed.(stack_end - bits_int ~size:64 0x1000) in
+    let order1 = Typed.(comp Ast.Bvule s_end stack_start) in
+    let order2 = Typed.(comp Ast.Bvule stack_end s_exp) in
+    push_assert state Typed.(manyop Or [order1; order2]);
+
+    f rest
+  )
+  in
+  f sections
+
+let init_sections ~sp ~addr_size state =
+  let state = copy_if_locked state in
+  let _ = Option.(
+    let+ elf = state.elf in
+    state.mem.allow_main <- false;
+    push_section_constraints ~sp ~addr_size state elf.sections;
+    List.iter (fun (x:Elf.File.section) -> Mem.create_section_frag ~addr_size state.mem x.name |> ignore) elf.sections;
+    Elf.SymTable.iter elf.symbols @@ fun sym ->
+      let len = List.find (fun x -> sym.size mod x = 0) [16;8;4;2;1] in
+      if sym.typ = Elf.Symbol.OBJECT then
+        let provenance = Mem.get_section_provenance state.mem sym.addr.section in
+        Seq.iota_step_up ~step:len ~endi:sym.size
+        |> Seq.iter (fun off ->
+          let data = Elf.Symbol.sub sym off len in
+          let addr = Exp.of_address ~size:addr_size Elf.Address.(sym.addr + off) in
+          let size = Ast.Size.of_bytes len in
+          let (exp, asserts) = Relocation.exp_of_data data in
+          Mem.write ~provenance state.mem ~addr ~size ~exp;
+          List.iter (push_relocation_assert state) asserts;
+        )
+  ) in
+  lock state;
+  state
+
+let init_sections_symbolic ~sp ~addr_size state =
+  let state = copy_if_locked state in
+  let _ = Option.(
+    let+ elf = state.elf in
+    push_section_constraints ~sp ~addr_size state elf.sections;
+    Elf.SymTable.iter elf.symbols @@ fun sym ->
+      if sym.typ = Elf.Symbol.OBJECT then
+        Hashtbl.replace state.mem.sections sym.addr.section Main
+  ) in
+  lock state;
+  state
 
 let pp s =
   let open Pp in

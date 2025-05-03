@@ -52,7 +52,7 @@ let rec split =
   let open Ast in
   function
   | Manyop (Bvmanyarith Bvadd, l, _) -> List.concat_map split l
-  | Unop (Extract (last, first), e, _) ->
+  | Unop (Extract (last, (0 as first)), e, _) ->
       let l = split e in
       List.map (Typed.extract ~first ~last) l
   | Unop (Bvneg, e, _) ->
@@ -63,20 +63,6 @@ let rec split =
       let l' = split e' in
       let rl' = List.rev_map Typed.neg l' in
       List.rev_append rl' l
-  | Manyop (Concat, l, _) ->
-      let all_splits = List.map split l in
-      let defaults = List.map (fun e ->
-        let size = e |> Typed.get_type |> Typed.expect_bv in
-        Typed.bits_int ~size 0
-      ) l in
-      let terms = List.transpose ~defaults all_splits in
-      List.map Typed.concat terms
-  | Unop (ZeroExtend m, e, _) ->
-      let l = split e in
-      List.map (Typed.unop (ZeroExtend m)) l
-  | Unop (SignExtend s, e, _) ->
-      let l = split e in
-      List.map (Typed.unop (SignExtend s)) l
   | e -> [e]
 
 let merge ~size l = if l = [] then Typed.zero ~size else Typed.sum l

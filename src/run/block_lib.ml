@@ -93,24 +93,25 @@ let run ?(every_instruction = false) ?relevant (b : t) (start : State.t) : label
   assert (State.is_locked start);
   let rec run_from state =
     let pc_exp = State.get_reg_exp state pcreg in
+    State.Simplify.ctxfull state;
     if State.is_possible state then
       match b.endpred pc_exp with
       | Some endmsg ->
           info "Stopped at pc %t because %s" (Pp.top State.Exp.pp pc_exp) endmsg;
-          State.Simplify.ctxfull state;
+          (* State.Simplify.ctxfull state; *)
           State.lock state;
           State.Tree.{ state; data = End endmsg; rest = [] }
       | None -> (
-          let prelock state = State.Simplify.ctxfull state in
+          (* let prelock state = State.Simplify.ctxfull state in *)
           if every_instruction then begin
-            prelock state;
+            (* prelock state; *)
             State.lock state
           end;
           let states =
             let pc = State.Exp.expect_sym_address pc_exp in
             if Option.fold ~none:true ~some:(Fun.flip Hashtbl.mem pc) relevant then (
               info "Running pc %t" (Pp.top State.Exp.pp pc_exp);
-              Runner.run ~prelock b.runner state
+              Runner.run ~prelock:ignore b.runner state
             )
             else (
               info "Skipping pc %t" (Pp.top State.Exp.pp pc_exp);
@@ -131,7 +132,7 @@ let run ?(every_instruction = false) ?relevant (b : t) (start : State.t) : label
         )
     else begin
       info "Reached dead code at %t" (Pp.top State.Exp.pp pc_exp);
-      State.Simplify.ctxfull state;
+      (* State.Simplify.ctxfull state; *)
       State.lock state;
       State.Tree.{ state; data = End "Reached dead code"; rest = [] }
     end
@@ -162,7 +163,7 @@ let gen_endpred ?min ?max ?loop ?(brks = []) () : State.exp -> string option =
     ( try
       Some (State.Exp.expect_sym_address pc_exp)
     with
-      _ -> debug "PC is sus"; None
+      _ -> None
     ) |> Option.map (fun pc ->
       debug "enpred: Evaluating PC %t" (Pp.top Elf.Address.pp pc);
       match (min, max, loop) with

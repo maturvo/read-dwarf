@@ -20,7 +20,7 @@ type assertion =
 type rel = {
   target : target;
   value : exp;
-  assertions: assertion list;
+  checks: assertion list;
   mask : int * int;
 }
 
@@ -35,14 +35,14 @@ let rel_of_aarch64_linksem Elf_symbolic.{rel_desc_value; rel_desc_checks; rel_de
   | Elf_symbolic.BinOp (x, op, y) -> BinOp (value_of_linksem x, op, value_of_linksem y)
   | Elf_symbolic.UnOp (op, x) -> UnOp (op, value_of_linksem x)
   in
-  let assertions = List.map (function
+  let checks = List.map (function
     | Elf_symbolic.Overflow (min, max) -> Range (Z.to_int64 min, Z.to_int64 max)
     | Elf_symbolic.Alignment (bits) -> Alignment (Z.to_int bits)
   ) rel_desc_checks in
   let hi, lo = rel_desc_mask in
   {
     target=AArch64 rel_desc_target;
-    assertions;
+    checks;
     mask = (Z.to_int hi, Z.to_int lo);
     value = value_of_linksem rel_desc_value
   }

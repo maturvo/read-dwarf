@@ -264,7 +264,7 @@ module Relocation = struct
       | Alignment b ->
         let last = b-1 in
         Typed.(extract ~first:0 ~last value = bits_int ~size:b 0)
-    ) relocation.assertions in
+    ) relocation.checks in
     let (last, first) = relocation.mask in
     let value = Typed.extract ~first ~last value in
     { value; asserts; target = relocation.target }

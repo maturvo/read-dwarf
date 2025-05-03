@@ -76,7 +76,7 @@ let commands =
     Run.TestRelProg.command;
     CopySourcesCmd.command;
     Z3.Test.command;
-    Relsim.Base.command;
+    Relsim.command;
   ]
 
 let _ = Printexc.record_backtrace Config.enable_backtrace

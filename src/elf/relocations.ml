@@ -81,7 +81,9 @@ let pp_target = Pp.(function
 | AArch64 Abi_aarch64_symbolic_relocation.ADD -> !^"ADD"
 | AArch64 Abi_aarch64_symbolic_relocation.ADRP -> !^"ADRP"
 | AArch64 Abi_aarch64_symbolic_relocation.CALL -> !^"CALL"
-| AArch64 Abi_aarch64_symbolic_relocation.LDST b -> !^"LDST" ^^ int (1 lsl b))
+| AArch64 Abi_aarch64_symbolic_relocation.LDST b -> !^"LDST" ^^ int (1 lsl b)
+| AArch64 Abi_aarch64_symbolic_relocation.CONDBR -> !^"CONDBR"
+| AArch64 Abi_aarch64_symbolic_relocation.B -> !^"B")
 
 let pp_rel rel =
   let hi, lo = rel.mask in

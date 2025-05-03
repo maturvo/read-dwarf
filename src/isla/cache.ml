@@ -86,7 +86,9 @@ module Opcode (*: Cache.Key *) = struct
   | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADRP) -> 3
   | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADD) -> 4
   | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL) -> 5
-  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.LDST b) -> 6 + b
+  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.LDST b) -> assert (b < 5); 6 + b
+  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CONDBR) -> 11
+  | Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.B) -> 12
 
   let reloc_of_id: int -> Relocation.t option = function
   | 0 -> None
@@ -95,7 +97,10 @@ module Opcode (*: Cache.Key *) = struct
   | 3 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADRP)
   | 4 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.ADD)
   | 5 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CALL)
-  | x -> Some (Elf.Relocations.AArch64 (Abi_aarch64_symbolic_relocation.LDST (x-6)))
+  | x when x < 11 -> Some (Elf.Relocations.AArch64 (Abi_aarch64_symbolic_relocation.LDST (x-6)))
+  | 11 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.CONDBR)
+  | 12 -> Some (Elf.Relocations.AArch64 Abi_aarch64_symbolic_relocation.B)
+  | x -> fail "Invalid relocation id %d" x
 
   let equal a b =
     match (a, b) with

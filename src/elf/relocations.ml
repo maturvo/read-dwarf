@@ -12,8 +12,6 @@ type exp =
 | Const of int
 | BinOp of (exp * binary_operation * exp)
 | UnOp of (unary_operation * exp)
-(* | AssertRange of (exp * int * int) *)
-(* | Mask of (exp * int * int) *)
 
 type assertion =
 | Range of int64 * int64
@@ -30,32 +28,30 @@ type t = rel IMap.t
 
 type linksem_t = LinksemRelocatable.rels
 
-let exp_of_linksem =
+let rel_of_aarch64_linksem Elf_symbolic.{rel_desc_value; rel_desc_checks; rel_desc_mask; rel_desc_target  } =
   let rec value_of_linksem = function
   | Elf_symbolic.Section s -> Section s
   | Elf_symbolic.Const x -> Const (Z.to_int x)
   | Elf_symbolic.BinOp (x, op, y) -> BinOp (value_of_linksem x, op, value_of_linksem y)
   | Elf_symbolic.UnOp (op, x) -> UnOp (op, value_of_linksem x)
-  | Elf_symbolic.AssertRange (_, _, _) -> Raise.fail "AssertRange should not occur in value expression"
-  | Elf_symbolic.AssertAlignment (_, _) -> Raise.fail "AssertAlignment should not occur in value expression"
-  | Elf_symbolic.Mask (_, _, _) -> Raise.fail "AssertRange should not occur in value expression"
-  in function
-  | Elf_symbolic.Mask (e, hi, lo) ->
-      let rec extract_asserts e =
-        match e with
-        | Elf_symbolic.AssertRange (e, min, max) -> let (e, a) = extract_asserts e in e, Range (Z.to_int64 min, Z.to_int64 max) :: a
-        | Elf_symbolic.AssertAlignment (e, bits) -> let (e, a) = extract_asserts e in e, Alignment (Z.to_int bits) :: a
-        | e -> e, []
-        in
-      let e, assertions = extract_asserts e in
-      fun target -> {target; assertions; mask = (Z.to_int hi, Z.to_int lo); value = value_of_linksem e}
-  | _ -> Raise.fail "Expression does not have Mask in top level"
+  in
+  let assertions = List.map (function
+    | Elf_symbolic.Overflow (min, max) -> Range (Z.to_int64 min, Z.to_int64 max)
+    | Elf_symbolic.Alignment (bits) -> Alignment (Z.to_int bits)
+  ) rel_desc_checks in
+  let hi, lo = rel_desc_mask in
+  {
+    target=AArch64 rel_desc_target;
+    assertions;
+    mask = (Z.to_int hi, Z.to_int lo);
+    value = value_of_linksem rel_desc_value
+  }
 
 
 let of_linksem: linksem_t -> t = function
 | LinksemRelocatable.AArch64 relocs ->
-    let add k Elf_symbolic.{ arel_value; arel_target } m =
-      IMap.add (Z.to_int k) (exp_of_linksem arel_value (AArch64 arel_target)) m
+    let add k rel m =
+      IMap.add (Z.to_int k) (rel_of_aarch64_linksem rel) m
     in
     Pmap.fold add relocs IMap.empty
 

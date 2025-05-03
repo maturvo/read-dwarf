@@ -5,7 +5,7 @@ module SMap = Map.Make (String)
 type sym_addr = string * Z.t
 
 type rels =
-  | AArch64 of (Z.t, Abi_aarch64_symbolic_relocation.aarch64_relocation_target Elf_symbolic.abstract_relocation) Pmap.map
+  | AArch64 of (Z.t, Abi_aarch64_symbolic_relocation.aarch64_relocation_target Elf_symbolic.universal_relocation) Pmap.map
 
 type sym_data =
 Byte_sequence_wrapper.byte_sequence * rels

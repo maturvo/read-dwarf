@@ -1,5 +1,9 @@
 (* TODO header *)
 
+open Logs.Logger (struct
+  let str = __MODULE__
+end)
+
 module SMap = Map.Make (String)
 
 type rels =
@@ -24,12 +28,14 @@ let get_elf64_file_global_symbol_init (f: Elf_file.elf64_file) : global_symbol_i
     let rel_cache = ref SMap.empty in
     let get_relocs section =
       match SMap.find_opt section !rel_cache with
-      | Some rels -> rels
+      | Some rels -> Error.return rels
       | None ->
         if machine = Elf_header.elf_ma_aarch64 then
           Error.bind
             (Elf_symbolic.extract_elf64_relocations_for_section f Abi_aarch64_symbolic_relocation.aarch64_relocation_interpreter section)
-            @@ fun relocs -> Error.return (AArch64 relocs)
+            @@ fun relocs -> 
+                rel_cache := SMap.add section (AArch64 relocs) !rel_cache;
+                Error.return (AArch64 relocs)
         else
           Error.fail @@ "machine not supported " ^ (Elf_header.string_of_elf_machine_architecture machine)
     in
@@ -65,6 +71,7 @@ let get_elf64_file_global_symbol_init (f: Elf_file.elf64_file) : global_symbol_i
               in
             Error.bind data @@ fun data ->
               Error.bind (String_table.get_string_at name strtab) @@ fun str ->
+              debug "Processed %s\n" str;
               Error.return (str, (typ, size, addr, (data, relocs), bnd))
         ) (List.nth_opt secs shndx)
     ) symtab |> Error.mapM Fun.id

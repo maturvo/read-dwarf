@@ -133,7 +133,7 @@ let mk_call_graph test (an : CollectedType.analysis) =
     List.sort
       (function
         | (a, _) -> (
-            function (a', _) -> Sym.compare a a'
+            function (a', _) -> Sym.Ordered.compare a a'
           ))
       (elf_symbols @ extra_bl_targets)
   in

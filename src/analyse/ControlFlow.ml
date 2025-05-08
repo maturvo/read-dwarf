@@ -439,10 +439,12 @@ AArch64:
  *)
 
 let objdump_line_regexp =
-  Str.regexp " *\\([0-9a-fA-F]+\\):[ \t]\\([0-9a-fA-F ]+\\)\t\\([^ \r\t\n]+\\) *\\(.*\\)$"
+  Str.regexp " *\\([0-9a-fA-F]+\\):[ \t]\\([0-9a-fA-F ]+\\)\t\\([^ \r\t\n]+\\)[ \t]*\\(.*\\)\\([ \t][0-9a-fA-F]+:.*\\)$"
 
 let section_start_line_regexp =
   Str.regexp "Disassembly of section \\(.*\\):$"
+
+type relocations = (string * string) list
 
 type objdump_instruction =
   natural (*address*) * int list (*opcode bytes*) * string (*mnemonic*) * string
@@ -486,9 +488,35 @@ let parse_objdump_line (s : string) : (int64 * int list * string * string) optio
       let opcode_bytes = List.map parse_hex_int opcode_byte_strings in
       let mnemonic = Str.matched_group 3 s in
       let operands = Str.matched_group 4 s in
+      (try
+        debug "Relocation: %s\n" (Str.matched_group 5 s)
+      with
+      | Not_found -> ())
+      ;
       Some (addr_int64, opcode_bytes, mnemonic, operands)
     end
   else None
+
+(* let parse_objdump_relocation (s : string) : (string * string) option =
+  let parse_hex_int s' =
+    try Scanf.sscanf s' "%x" (fun i -> i)
+    with _ -> fatal "cannot parse relocation '%s' in objdump line %s\n" s' s
+  in
+  if Str.string_match objdump_line_regexp s 0 then
+    begin
+      let addr = Str.matched_group 1 s in
+      let op = Str.matched_group 2 s in
+      let op = strip_whitespace op in
+      let opcode_byte_strings =
+        [String.sub op 0 2;
+         String.sub op 2 2;
+         String.sub op 4 2;
+         String.sub op 6 2]
+      in
+      let opcode_bytes = List.map parse_hex_int opcode_byte_strings in
+      Some (addr, op)
+    end
+  else None *)
 
 (*
 let parse_objdump_lines arch lines : objdump_instruction list =
@@ -585,6 +613,11 @@ let mk_instructions test filename_objdump_d filename_branch_table_option :
 
   let address_of_index k = instructions.(k).i_addr in
 
+  Array.sort
+    (fun i1 i2 ->
+      Sym.Ordered.compare (i1.i_addr) (i2.i_addr))
+    instructions;
+
   (instructions, index_of_address, index_option_of_address, address_of_index)
 
 (* pull out indirect branches *)
@@ -616,11 +649,11 @@ let highlight c =
 
 (* highlight branch targets to earlier addresses*)
 let pp_target_addr_wrt (addr : natural) (c : control_flow_insn) (a : natural) =
-  (if highlight c && Sym.less a addr then "^" else "") ^ pp_addr a
+  (if highlight c && Sym.Ordered.less a addr then "^" else "") ^ pp_addr a
 
 (* highlight branch come-froms from later addresses*)
 let pp_come_from_addr_wrt (addr : natural) (c : control_flow_insn) (a : natural) =
-  (if highlight c && Sym.greater a addr then "v" else "") ^ pp_addr a
+  (if highlight c && Sym.Ordered.greater a addr then "v" else "") ^ pp_addr a
 
 (*
 let pp_branch_targets (xs : (addr * control_flow_insn * (target_kind * addr * int * string) list) list)

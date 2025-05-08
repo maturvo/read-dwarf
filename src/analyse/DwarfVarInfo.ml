@@ -260,7 +260,7 @@ let pp_ranged_var (prefix : string) (var : ranged_var) : string =
 let pp_ranged_vars (prefix : string) (vars : ranged_var list) : string =
   String.concat "" (List.map (pp_ranged_var prefix) vars)
 
-let compare_pc_ranges ((n1, _, _), _) ((n1', _, _), _) = compare n1 n1'
+let compare_pc_ranges ((n1, _, _), _) ((n1', _, _), _) = Sym.Ordered.compare n1 n1'
 
 let local_by_pc_ranges (((svfp : Dwarf.sdt_variable_or_formal_parameter), _context) as var) :
     ranged_var list =
@@ -299,14 +299,14 @@ let mk_ranged_vars_at_instructions (sdt_d : Dwarf.sdt_dwarf) instructions :
     if k >= size then ()
     else
       let addr = instructions.(k).i_addr in
-      if not (Sym.less addr_prev addr) then
+      if not (Sym.Ordered.less addr_prev addr) then
         fatal "mk_ranged_vars_at_instructions found non-increasing address %s" (pp_addr addr);
       let (still_current, old) =
-        List.partition (function ((_, n2, _), _) -> Sym.less addr n2) prev
+        List.partition (function ((_, n2, _), _) -> Sym.Ordered.less addr n2) prev
       in
       let (new', remaining') =
         partition_first
-          (function ((n1, _n2, _ops), _var) as _rv -> Sym.greater_equal addr n1)
+          (function ((n1, _n2, _ops), _var) as _rv -> Sym.Ordered.greater_equal addr n1)
           remaining
       in
       (* TODO: do we need to drop any that have been totally skipped over? *)

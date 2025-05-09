@@ -295,9 +295,9 @@ with
   (Scanf.Scan_failure _ | End_of_file)  ->
    Scanf.sscanf s "%Lx" (fun i64 -> Sym.of_int64 i64)
 
-let parse_target s =
+let parse_target base s =
   match Scanf.sscanf s " %s %s" (fun s1 s2 -> (s1, s2)) with
-  | (s1, s2) -> Some (parse_addr s1, s2)
+  | (s1, s2) -> Some (Sym.add base (parse_addr s1), s2)
   | exception _ -> None
 
 let parse_drop_one s =
@@ -309,7 +309,20 @@ let parse_drop_one s =
   | (_, s') -> Some s'
   | exception _ -> None
 
-let parse_control_flow_instruction s mnemonic s' : control_flow_insn =
+let parse_relocation_target symbol_map s =
+  let s, offset = match String.split_on_char '+' s with
+  | [s1; s2] ->
+      s1, Scanf.sscanf s2 "0x%x" Fun.id
+  | [s] -> s, 0
+  | _ -> fatal "Unable to parse relocation target '%s'" s
+  in
+  let addr = List.find_map (fun (name, (_,_,addr,_,_)) -> if name = s then Some addr else None) symbol_map in
+  Option.map (Sym.add (Sym.of_int offset)) addr
+
+let parse_control_flow_instruction symbol_map base s mnemonic s' relocation : control_flow_insn =
+  let relocation_target = Option.bind relocation (fun (_typ, target) ->
+    Option.map (fun a -> (a, target)) (parse_relocation_target symbol_map target)
+  ) in
   (*   Printf.printf "s=\"%s\" mnemonic=\"%s\"  mnemonic chars=\"%s\" s'=\"%s\"   "s mnemonic (String.concat "," (List.map (function c -> string_of_int (Char.code c)) (char_list_of_string mnemonic))) s';flush stdout;*)
   let c =
     if List.mem String.equal mnemonic [".word"] then C_no_instruction
@@ -320,9 +333,9 @@ let parse_control_flow_instruction s mnemonic s' : control_flow_insn =
       (String.length mnemonic >= 2 && String.sub mnemonic 0 2 = "b.")
       || List.mem String.equal mnemonic ["b"; "bl"]
     then
-      match parse_target s' with
-      | None -> raise (Failure ("b./b/bl parse error for: \"" ^ s ^ "\"\n"))
-      | Some (a, s) ->
+      match parse_target base s', relocation_target with
+      | None, None -> raise (Failure ("b./b/bl parse error for: \"" ^ s ^ "\"\n"))
+      | _, Some(a, s) | Some (a, s), None ->
           if mnemonic = "b" then C_branch (a, s)
           else if mnemonic = "bl" then C_branch_and_link (a, s)
           else C_branch_cond (mnemonic, a, s)
@@ -330,9 +343,9 @@ let parse_control_flow_instruction s mnemonic s' : control_flow_insn =
       match parse_drop_one s' with
       | None -> raise (Failure ("cbz/cbnz 1 parse error for: " ^ s ^ "\n"))
       | Some s' -> (
-          match parse_target s' with
-          | None -> raise (Failure ("cbz/cbnz 2 parse error for: " ^ s ^ "\n"))
-          | Some (a, s) -> C_branch_cond (mnemonic, a, s)
+          match parse_target base s', relocation_target with
+          | None, None -> raise (Failure ("cbz/cbnz 2 parse error for: " ^ s ^ "\n"))
+          | _, Some(a, s) | Some (a, s), None -> C_branch_cond (mnemonic, a, s)
         )
     else if List.mem String.equal mnemonic ["tbz"; "tbnz"] then
       match parse_drop_one s' with
@@ -341,9 +354,9 @@ let parse_control_flow_instruction s mnemonic s' : control_flow_insn =
           match parse_drop_one s'' with
           | None -> raise (Failure ("tbz/tbnz 2 parse error for: " ^ s ^ "\n"))
           | Some s''' -> (
-              match parse_target s''' with
-              | None -> raise (Failure ("tbz/tbnz 3 parse error for: " ^ s ^ "\n"))
-              | Some (a, s'''') ->
+              match parse_target base s''', relocation_target with
+              | None, None -> raise (Failure ("tbz/tbnz 3 parse error for: " ^ s ^ "\n"))
+              | _, Some(a, s'''') | Some (a, s''''), None ->
                   (*                Printf.printf "s=%s mnemonic=%s s'=%s s''=%s s'''=%s s''''=%s\n"s mnemonic s' s'' s''' s'''';*)
                   C_branch_cond (mnemonic, a, s'''')
             )
@@ -438,16 +451,21 @@ AArch64:
    10004:	52800129 	mov	w9, #0x9                   	// #9
  *)
 
+let relocation_regexp_string = "[ \t][0-9a-fA-F]+:[ \t]\\([0-9A-Z_]+\\)\t\\(.*\\)"
+
 let objdump_line_regexp =
-  Str.regexp " *\\([0-9a-fA-F]+\\):[ \t]\\([0-9a-fA-F ]+\\)\t\\([^ \r\t\n]+\\)[ \t]*\\(.*\\)\\([ \t][0-9a-fA-F]+:.*\\)$"
+  Str.regexp (" *\\([0-9a-fA-F]+\\):[ \t]\\([0-9a-fA-F ]+\\)\t\\([^ \r\t\n]+\\)[ \t]*\\([^:]*\\)\\(" ^ relocation_regexp_string ^ "\\)?$")
 
 let section_start_line_regexp =
   Str.regexp "Disassembly of section \\(.*\\):$"
 
-type relocations = (string * string) list
+type relocation = string * string
+
+type raw_objdump_instruction =
+  int64 (*address*) * int list (*opcode bytes*) * string (*mnemonic*) * string * relocation option
 
 type objdump_instruction =
-  natural (*address*) * int list (*opcode bytes*) * string (*mnemonic*) * string
+  natural (*address*) * int list (*opcode bytes*) * string (*mnemonic*) * string * relocation option
 
 (*args etc*)
 
@@ -457,7 +475,7 @@ let parse_section_start s =
   else
     None
 
-let parse_objdump_line (s : string) : (int64 * int list * string * string) option =
+let parse_objdump_line (s : string) : raw_objdump_instruction option =
   let parse_hex_int64 s' =
     try Scanf.sscanf s' "%Lx" (fun i64 -> i64)
     with _ -> fatal "cannot parse address in objdump line %s\n" s
@@ -476,6 +494,7 @@ let parse_objdump_line (s : string) : (int64 * int list * string * string) optio
   in
   if Str.string_match objdump_line_regexp s 0 then
     begin
+      (* debug "matched line"; *)
       let addr_int64 = parse_hex_int64 (Str.matched_group 1 s) in
       let op = Str.matched_group 2 s in
       let op = strip_whitespace op in
@@ -488,12 +507,12 @@ let parse_objdump_line (s : string) : (int64 * int list * string * string) optio
       let opcode_bytes = List.map parse_hex_int opcode_byte_strings in
       let mnemonic = Str.matched_group 3 s in
       let operands = Str.matched_group 4 s in
-      (try
-        debug "Relocation: %s\n" (Str.matched_group 5 s)
+      let relocation = try
+        Some (Str.matched_group 6 s, Str.matched_group 7 s)
       with
-      | Not_found -> ())
-      ;
-      Some (addr_int64, opcode_bytes, mnemonic, operands)
+      | Not_found -> None
+      in
+      Some (addr_int64, opcode_bytes, mnemonic, operands, relocation)
     end
   else None
 
@@ -523,8 +542,8 @@ let parse_objdump_lines arch lines : objdump_instruction list =
   List.filter_map (parse_objdump_line arch) (Array.to_list lines)
  *)
 
-let with_symbolic_address (section: string) (addr, opcode_bytes, mnemonic, operands) : objdump_instruction =
-  (Sym_ocaml.Num.Offset (section, Nat_big_num.of_int64 addr), opcode_bytes, mnemonic, operands)
+let with_symbolic_address (section: string) (addr, opcode_bytes, mnemonic, operands, relocation) : objdump_instruction =
+  (Sym_ocaml.Num.Offset (section, Nat_big_num.of_int64 addr), opcode_bytes, mnemonic, operands, relocation)
 
 let rec parse_objdump_lines arch lines (next_index : int) (last_address : int64 option) (section: string option) :
     objdump_instruction list =
@@ -534,7 +553,7 @@ let rec parse_objdump_lines arch lines (next_index : int) (last_address : int64 
     match parse_objdump_line lines.(next_index) with
     (* skip over unparseable lines *)
     | None -> parse_objdump_lines arch lines (next_index + 1) last_address section
-    | Some ((addr, _opcode_bytes, _mnemonic, _operands) as i) -> (
+    | Some ((addr, _opcode_bytes, _mnemonic, _operands, _relocation) as i) -> (
         let mki = with_symbolic_address (Option.get section) in
         match last_address with
         | None -> mki i :: parse_objdump_lines arch lines (next_index + 1) (Some addr) section
@@ -543,7 +562,7 @@ let rec parse_objdump_lines arch lines (next_index : int) (last_address : int64 
             if addr > last_address'' then
               (* fake up "missing" instructions for any gaps in the address space*)
               (*warn "gap in objdump instruction address sequence at %s" (pp_addr last_address'');*)
-              mki (last_address'', [], "missing", "")
+              mki (last_address'', [], "missing", "", None)
               :: parse_objdump_lines arch lines next_index (Some last_address'') section
             else mki i :: parse_objdump_lines arch lines (next_index + 1) (Some addr) section
       )
@@ -574,7 +593,7 @@ let mk_instructions test filename_objdump_d filename_branch_table_option :
     Array.iteri
       (function
         | k -> (
-            function (addr, _, _, _) -> Hashtbl.add tbl addr k
+            function (addr, _, _, _, _) -> Hashtbl.add tbl addr k
           ))
       objdump_instructions;
     ( (function
@@ -591,9 +610,14 @@ let mk_instructions test filename_objdump_d filename_branch_table_option :
   let instructions =
     Array.map
       (function
-        | (addr, opcode_bytes, mnemonic, operands) ->
+        | (addr, opcode_bytes, mnemonic, operands, relocation) ->
+            (* a bit hacky *)
+            let base = match addr with
+            | Sym_ocaml.Num.Offset(s,_) -> Sym_ocaml.Num.section s
+            | Sym_ocaml.Num.Absolute(_) -> Sym.of_int 0
+            in
             let c : control_flow_insn =
-              parse_control_flow_instruction ("objdump line " ^ pp_addr addr) mnemonic operands
+              parse_control_flow_instruction test.symbol_map base ("objdump line " ^ pp_addr addr) mnemonic operands relocation
             in
 
             let targets =
@@ -607,6 +631,7 @@ let mk_instructions test filename_objdump_d filename_branch_table_option :
               i_operands = operands;
               i_control_flow = c;
               i_targets = targets;
+              i_relocation = relocation;
             })
       objdump_instructions
   in

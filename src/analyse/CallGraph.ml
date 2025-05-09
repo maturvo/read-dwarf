@@ -110,7 +110,7 @@ let mk_call_graph test (an : CollectedType.analysis) =
                        if
                          not
                            (List.exists
-                              (function (a'', _) -> Sym.equal a' a'')
+                              (function (a'', _) -> Sym.Ordered.equal a' a'')
                               elf_symbols)
                        then Some (a', ["FROM BL:" ^ s'])
                        else None)
@@ -122,7 +122,7 @@ let mk_call_graph test (an : CollectedType.analysis) =
     match axs with
     | [] -> acc
     | (a, x) :: axs' ->
-        if not (List.exists (function (a', _) -> Sym.equal a a') acc) then
+        if not (List.exists (function (a', _) -> Sym.Ordered.equal a a') acc) then
           dedup axs' ((a, x) :: acc)
         else dedup axs' acc
   in

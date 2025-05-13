@@ -269,11 +269,11 @@ let mk_line_info (eli : Dwarf.evaluated_line_info) instructions :
   let elifis = Array.make size [] in
 
   let sequences = List.flatten (List.map split_into_sequences eli) in
-  let compare_sequence s1 s2 = Sym.compare s1.elis_first s2.elis_first in
+  let compare_sequence s1 s2 = Sym.Ordered.compare s1.elis_first s2.elis_first in
   let sequences_sorted = List.sort compare_sequence sequences in
 
   let entries = List.flatten (List.map split_into_entries sequences_sorted) in
-  let compare_entry e1 e2 = Sym.compare e1.elie_first e2.elie_first in
+  let compare_entry e1 e2 = Sym.Ordered.compare e1.elie_first e2.elie_first in
   let entries_sorted = List.sort compare_entry entries in
 
   (*List.iter (function elie -> Printf.printf "%s" (pp_elie_concise elie)) entries_sorted;*)
@@ -286,7 +286,7 @@ let mk_line_info (eli : Dwarf.evaluated_line_info) instructions :
         match remaining with
         | [] -> (acc, remaining)
         | elie :: remaining' ->
-            if Sym.less_equal elie.elie_first addr then
+            if Sym.Ordered.less_equal elie.elie_first addr then
               mk_new_perhaps_relevant (elie :: acc) remaining'
             else (acc, remaining)
       in

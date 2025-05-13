@@ -4,7 +4,7 @@
  (modules main)
  (flags
   (:standard -open Utils))
- (libraries config run utils sig_aarch64 other_cmds))
+ (libraries config run utils sig_aarch64 other_cmds relsim))
 
 (executable
  (name main_riscv64)
@@ -20,4 +20,4 @@
  (flags
   (:standard -open Utils))
  (modules copySourcesCmd copySources dumpDwarf dumpSym readDwarf)
- (libraries run utils config state trace))
+ (libraries run utils config state trace relsim))

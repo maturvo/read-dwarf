@@ -328,6 +328,10 @@ module Mem = struct
   (** Get the main fragment of memory *)
   let get_main { main; _ } = main
 
+  (** Get fragment *)
+  let get_frag mem i =
+    Vec.get mem.frags i
+
   (** Empty memory, every address is unbound *)
   let empty () = { main = Fragment.empty; frags = Vec.empty (); sections = Hashtbl.create 10; allow_main = true }
 

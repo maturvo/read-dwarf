@@ -106,6 +106,9 @@ let typing_enabled ~(ctxt : t) = ctxt.dwarf <> None
 module Z3St = State.Simplify.Z3St
 
 let simplify ~(ctxt : t) (exp : State.exp) : State.exp =
+  debug "Before simplification: %t" (Pp.top State.Exp.pp exp);
+  debug "Before simplification: %t" (Pp.top State.Exp.pp (Z3St.simplify_full exp));
   exp
   |> Z3St.simplify_subterms_full ~hyps:ctxt.asserts
   |> Z3St.simplify_full
+  |> Fun.tee (fun e -> debug "After simplification: %t" (Pp.top State.Exp.pp e))

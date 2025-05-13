@@ -259,6 +259,9 @@ module Mem : sig
 
   (** Get the main fragment of memory *)
   val get_main : t -> Fragment.t
+
+  (** Get fragment *)
+  val get_frag : t -> int -> Exp.t * Fragment.t 
 end
 
 (** {1 State type } *)
